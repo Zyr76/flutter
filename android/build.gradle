@@ -1,0 +1,27 @@
+allprojects {
+    repositories {
+        maven { url "https://maven.aliyun.com/repository/google" }
+        maven { url "https://maven.aliyun.com/repository/central" }
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
+
+subprojects {
+    // 关闭 lint，避免内存受限环境下 lintVital 崩溃
+    project.tasks.configureEach { task ->
+        if (task.name.startsWith("lint")) {
+            task.enabled = false
+        }
+    }
+}

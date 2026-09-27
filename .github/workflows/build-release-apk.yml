@@ -1,0 +1,50 @@
+name: Build Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 与本地构建环境保持一致的 Flutter 版本；
+      # 若该版本在官方归档中不可用，可改成 channel: stable（取最新稳定版）。
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      # 发布构建剥离原生库符号需要 NDK；版本与 flutter.ndkVersion 对齐
+      - name: Accept Android licenses & install NDK
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;28.2.13676358"
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      # 仅出 arm64-v8a（与项目 android/app/build.gradle 的 abiFilters 一致）
+      # release 包用项目里配置的 debug 签名，可直接侧载安装
+      - name: Build release APK
+        run: flutter build apk --release --target-platform android-arm64
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiguang-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
