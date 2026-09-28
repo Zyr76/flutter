@@ -22,4 +22,22 @@ void main() {
     expect(find.text('hi'), findsOneWidget);
     expect(find.text('go'), findsOneWidget);
   });
+
+  testWidgets('有状态交互控件：点开关/复选框会即时切换', (tester) async {
+    final w = Renderer.build(
+      '{"type":"Column","children":['
+      '{"type":"Switch","value":false},'
+      '{"type":"Checkbox","value":false}]}',
+    );
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(tester.widget<Switch>(find.byType(Switch)).value, false);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, true);
+
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, false);
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, true);
+  });
 }

@@ -16,16 +16,13 @@ import java.util.TreeMap;
 /**
  * Lua 值与 JSON 之间的互转，并把「AndroLua 布局表」规范化成 Flutter 渲染器认识的 spec。
  *
- * <p>规范化支持两种写法：
+ * <p>布局写法与 loadlayout 一致：首个元素是控件，其余数字下标项是子控件，属性写 key=value。
+ * 控件名用 Flutter 的名字（Column/Row/Text/Button…），也兼容 Android 类名归一。
  * <pre>
- * -- 1) 直接给 type
- * flutterRender{ type="Column", children={ {type="Text", text="hi"} } }
- *
- * -- 2) AndroLua 布局表风格：首个元素是控件名，子节点是数字下标项
- * flutterRender{
- *   列, 方向="vertical",
- *   { 文本, 文字="hi" },
- *   { 按钮, 文字="点我", 点击=function() end },
+ * 渲染Flutter{
+ *   Column, gap = 12, layout_width = "fill",
+ *   { Text, text = "hi", fontSize = 20 },
+ *   { Button, text = "点我", onClick = { call = "ping" } },
  * }
  * </pre>
  */
@@ -122,7 +119,7 @@ public final class LuaJson {
     }
 
     // ============================================================
-    // 规范化：AndroLua 布局表 / 中文键 -> 统一 spec
+    // 规范化：AndroLua 布局表 -> 统一 spec
     // ============================================================
 
     static Object normalizeNode(Object raw) {
@@ -164,8 +161,6 @@ public final class LuaJson {
             boolean usedOne = false;
             if (map.containsKey("type")) {
                 type = map.get("type");
-            } else if (map.containsKey("控件")) {
-                type = map.get("控件");
             } else if (map.containsKey("1")) {
                 type = map.get("1");
                 usedOne = true;
@@ -199,7 +194,7 @@ public final class LuaJson {
                     numeric.put(idx, e.getValue());
                     continue;
                 }
-                if ("type".equals(k) || "控件".equals(k) || "children".equals(k)) {
+                if ("type".equals(k) || "children".equals(k)) {
                     continue;
                 }
                 addProp(node, k, e.getValue());
@@ -241,20 +236,11 @@ public final class LuaJson {
         return true;
     }
 
-    /** 把 key=value 收进规范节点：键做别名映射，值做规整（fill/match、加粗、对齐等）。 */
     private static void addProp(Map<String, Object> node, String key, Object value) {
         String k = propKey(key);
-
-        if ("加粗".equals(key) || "粗体".equals(key) || "粗体字".equals(key)) {
-            if (isTruthy(value)) {
-                node.put("fontWeight", "bold");
-            }
-            return;
-        }
         if (k == null) {
             return;
         }
-
         switch (k) {
             case "width":
             case "height":
@@ -263,94 +249,12 @@ public final class LuaJson {
             case "fontWeight":
                 node.put(k, isTruthy(value) ? "bold" : String.valueOf(value));
                 break;
-            case "alignment":
-                node.put(k, mapAlignment(value));
-                break;
-            case "textAlign":
-                node.put(k, mapTextAlign(value));
-                break;
-            case "mainAxisAlignment":
-                node.put(k, mapMain(value));
-                break;
-            case "crossAxisAlignment":
-                node.put(k, mapCross(value));
-                break;
-            case "crossAxisCount":
-                node.put(k, value);
-                break;
             default:
                 node.put(k, value);
         }
     }
 
-    private static final Map<String, String> ALIGN = new HashMap<String, String>();
-    private static final Map<String, String> CROSS = new HashMap<String, String>();
-    private static final Map<String, String> MAIN = new HashMap<String, String>();
-    private static final Map<String, String> TEXT_ALIGN = new HashMap<String, String>();
-
-    static {
-        ALIGN.put("居中", "center");
-        ALIGN.put("中", "center");
-        ALIGN.put("左上", "topleft");
-        ALIGN.put("右上", "topright");
-        ALIGN.put("左下", "bottomleft");
-        ALIGN.put("右下", "bottomright");
-        ALIGN.put("两端", "spacebetween");
-        ALIGN.put("均匀", "spacearound");
-        ALIGN.put("环绕", "spaceevenly");
-
-        CROSS.put("居中", "center");
-        CROSS.put("起始", "start");
-        CROSS.put("开始", "start");
-        CROSS.put("结束", "end");
-        CROSS.put("拉伸", "stretch");
-        CROSS.put("铺满", "stretch");
-
-        MAIN.put("居中", "center");
-        MAIN.put("起始", "start");
-        MAIN.put("开始", "start");
-        MAIN.put("结束", "end");
-        MAIN.put("两端", "spaceBetween");
-        MAIN.put("均匀", "spaceEvenly");
-
-        TEXT_ALIGN.put("居中", "center");
-        TEXT_ALIGN.put("中", "center");
-        TEXT_ALIGN.put("左", "left");
-        TEXT_ALIGN.put("右", "right");
-    }
-
-    private static Object mapAlignment(Object v) {
-        if (v instanceof String) {
-            String s = ALIGN.get(v);
-            return s != null ? s : v;
-        }
-        return v;
-    }
-
-    private static Object mapCross(Object v) {
-        if (v instanceof String) {
-            String s = CROSS.get(v);
-            return s != null ? s : v;
-        }
-        return v;
-    }
-
-    private static Object mapMain(Object v) {
-        if (v instanceof String) {
-            String s = MAIN.get(v);
-            return s != null ? s : v;
-        }
-        return v;
-    }
-
-    private static Object mapTextAlign(Object v) {
-        if (v instanceof String) {
-            String s = TEXT_ALIGN.get(v);
-            return s != null ? s : v;
-        }
-        return v;
-    }
-
+    /** 宽/高取值规整："fill"/"match_parent" -> "fill"；"wrap"/"自适应"类 -> 去掉。 */
     private static Object normalizeDim(Object v) {
         if (v instanceof String) {
             String s = ((String) v).trim().toLowerCase();
@@ -375,59 +279,27 @@ public final class LuaJson {
         if (v instanceof Number) {
             return ((Number) v).doubleValue() != 0;
         }
-        String s = String.valueOf(v);
-        return s.equals("1") || s.equalsIgnoreCase("true") || s.equals("是") || s.equals("加粗");
+        return "true".equalsIgnoreCase(String.valueOf(v));
     }
 
-    // ---- 键别名 ----
+    // ---- 属性键别名（规范键即自身；这里只列与规范键不同的别名） ----
     private static final Map<String, String> PROPS = new HashMap<String, String>();
 
     static {
-        alias("text", "文字", "文本", "文本内容", "文字内容", "value");
-        alias("fontSize", "字号", "字体大小", "字体尺寸");
-        alias("color", "颜色", "文字颜色", "背景", "背景色", "backgroundColor", "textColor", "bg");
-        alias("fontWeight", "字重", "字体粗细");
-        alias("width", "宽", "宽度", "layout_width");
-        alias("height", "高", "高度", "layout_height");
-        alias("weight", "权重", "layout_weight", "flex");
-        alias("padding", "内边距", "内间距");
-        alias("margin", "外边距", "外间距");
-        alias("radius", "圆角", "半径", "borderRadius");
-        alias("borderWidth", "边框宽", "边框宽度");
-        alias("borderColor", "边框色", "边框颜色");
-        alias("alignment", "对齐", "对齐方式", "layout_gravity", "gravity");
-        alias("mainAxisAlignment", "主轴对齐");
-        alias("crossAxisAlignment", "交叉轴对齐");
-        alias("mainAxisSize", "主轴尺寸");
-        alias("gap", "间距", "子间距", "spacing");
-        alias("runSpacing", "行距", "换行间距");
-        alias("onTap", "点击", "onClick", "点击事件", "单击");
-        alias("onChange", "变化", "onChanged", "值变化");
-        alias("hint", "提示", "占位");
-        alias("label", "标签");
-        alias("icon", "图标");
-        alias("size", "尺寸");
-        alias("url", "地址", "图片地址", "src");
-        alias("elevation", "海拔", "阴影");
-        alias("opacity", "不透明度", "透明度");
-        alias("aspectRatio", "宽高比", "比例");
-        alias("crossAxisCount", "列数", "列数count");
-        alias("maxLines", "最大行数");
-        alias("textAlign", "文字对齐");
-        alias("min", "最小值");
-        alias("max", "最大值");
-        alias("thickness", "粗细");
-        alias("title", "标题");
-        alias("subtitle", "副标题");
-        alias("leading", "左侧");
-        alias("trailing", "右侧");
-        alias("left", "左");
-        alias("top", "上");
-        alias("right", "右");
-        alias("bottom", "下");
-        alias("shrinkWrap", "自适应高度");
-        alias("viewType", "视图类型");
-        alias("textAlign", "文字对齐");
+        alias("width", "layout_width");
+        alias("height", "layout_height");
+        alias("weight", "layout_weight", "flex");
+        alias("padding", "layout_padding");
+        alias("margin", "layout_margin");
+        alias("radius", "borderRadius", "cornerRadius");
+        alias("alignment", "layout_gravity", "gravity", "align");
+        alias("onTap", "onClick", "click");
+        alias("onChange", "onChanged");
+        alias("gap", "spacing");
+        alias("text", "value");
+        alias("fontWeight", "bold", "strong");
+        alias("textAlign", "text_alignment");
+        alias("backgroundColor", "bg");
     }
 
     private static void alias(String canonical, String... names) {
@@ -444,57 +316,25 @@ public final class LuaJson {
         return c != null ? c : key;
     }
 
-    // ---- 控件名（中文 -> Flutter 控件） ----
+    // ---- 控件名 ----
     static final Map<String, String> TYPES = new HashMap<String, String>();
 
     static {
-        type("Column", "列", "竖列", "垂直布局", "纵向布局");
-        type("Row", "行", "横排", "水平布局", "横向布局");
-        type("Stack", "堆叠", "叠加", "层叠");
-        type("Container", "容器");
-        type("Padding", "内边距", "边距");
-        type("Center", "居中");
-        type("Expanded", "弹性", "拉伸");
-        type("SizedBox", "固定尺寸", "占位", "空白");
-        type("Spacer", "弹簧", "挤压");
-        type("Text", "文本", "文字");
-        type("SelectableText", "可选文本");
-        type("Button", "按钮");
-        type("ElevatedButton", "凸起按钮");
-        type("TextButton", "文字按钮");
-        type("FilledButton", "填充按钮");
-        type("IconButton", "图标按钮");
-        type("FloatingActionButton", "悬浮按钮");
-        type("Icon", "图标");
-        type("Image", "图片");
-        type("Card", "卡片");
-        type("ListView", "列表", "列表视图");
-        type("GridView", "网格", "网格视图");
-        type("Wrap", "流式布局", "自动换行");
-        type("Align", "对齐容器");
-        type("AspectRatio", "宽高比");
-        type("ClipRRect", "圆角裁剪");
-        type("Opacity", "透明");
-        type("SafeArea", "安全区");
-        type("Positioned", "定位", "绝对定位");
-        type("CircleAvatar", "头像", "圆头像");
-        type("Chip", "标签");
-        type("Checkbox", "复选框", "勾选框");
-        type("Slider", "滑块", "滑动条");
-        type("Switch", "开关");
-        type("TextField", "输入框", "编辑框");
-        type("Divider", "分割线");
-        type("CircularProgressIndicator", "圆形进度", "圆形进度条");
-        type("LinearProgressIndicator", "线性进度", "进度条");
-        type("ListTile", "列表项");
-        type("AndroidView", "原生控件", "安卓控件");
-    }
-
-    private static void type(String canonical, String... names) {
-        TYPES.put(canonical, canonical);
+        String[] names = {
+                "Column", "Row", "Stack", "Container", "Padding", "Center", "Expanded",
+                "SizedBox", "Spacer", "Text", "SelectableText", "Button", "ElevatedButton",
+                "TextButton", "FilledButton", "IconButton", "FloatingActionButton", "Icon",
+                "Image", "Card", "ListView", "GridView", "Wrap", "Align", "AspectRatio",
+                "ClipRRect", "Opacity", "SafeArea", "Positioned", "CircleAvatar", "Chip",
+                "Checkbox", "Slider", "Switch", "TextField", "Divider",
+                "CircularProgressIndicator", "LinearProgressIndicator", "ListTile", "AndroidView"
+        };
         for (String n : names) {
-            TYPES.put(n, canonical);
+            TYPES.put(n, n);
         }
+        // 少量兼容别名（Android 常用名 -> Flutter 控件）
+        TYPES.put("EditText", "TextField");
+        TYPES.put("Android", "AndroidView");
     }
 
     static String widgetType(Object head) {
@@ -504,12 +344,11 @@ public final class LuaJson {
         if (head instanceof String) {
             return resolveTypeName(((String) head).trim());
         }
-        // Java Class / 实例：取简单类名（可容忍 Android 类名，如 android.widget.Button -> Button）
         String name = head instanceof Class ? ((Class<?>) head).getSimpleName() : head.getClass().getSimpleName();
         return resolveTypeName(name);
     }
 
-    /** 控件名归一：中文名 / 全限定类名 / 带 View 后缀 -> Flutter 控件名。 */
+    /** 控件名归一：全限定类名 / 带 View·Layout 后缀的 Android 类名 -> Flutter 控件名。 */
     private static String resolveTypeName(String s) {
         if (s == null || s.isEmpty()) {
             return "Container";
@@ -540,16 +379,16 @@ public final class LuaJson {
     }
 
     // ============================================================
-    // Java -> JSON（规范化后的 spec）
+    // Java -> JSON
     // ============================================================
 
     static String toJsonString(Object value) {
         StringBuilder sb = new StringBuilder();
-        write(sb, value, null);
+        write(sb, value);
         return sb.toString();
     }
 
-    private static void write(StringBuilder sb, Object value, String key) {
+    private static void write(StringBuilder sb, Object value) {
         if (value == null) {
             sb.append("null");
             return;
@@ -571,16 +410,12 @@ public final class LuaJson {
             }
             return;
         }
-        if (value instanceof LuaJsonSerializable) {
-            sb.append(((LuaJsonSerializable) value).toJsonString());
-            return;
-        }
         if (value instanceof JSONArray) {
-            write((StringBuilder) sb, jsonToJava((JSONArray) value), key);
+            write(sb, jsonToJava((JSONArray) value));
             return;
         }
         if (value instanceof JSONObject) {
-            write((StringBuilder) sb, jsonToJava((JSONObject) value), key);
+            write(sb, jsonToJava((JSONObject) value));
             return;
         }
         if (value instanceof Map) {
@@ -604,7 +439,7 @@ public final class LuaJson {
             first = false;
             writeString(sb, String.valueOf(e.getKey()));
             sb.append(':');
-            write(sb, e.getValue(), String.valueOf(e.getKey()));
+            write(sb, e.getValue());
         }
         sb.append('}');
     }
@@ -617,7 +452,7 @@ public final class LuaJson {
                 sb.append(',');
             }
             first = false;
-            write(sb, v, null);
+            write(sb, v);
         }
         sb.append(']');
     }
@@ -657,11 +492,6 @@ public final class LuaJson {
             }
         }
         sb.append('"');
-    }
-
-    /** 供测试/扩展使用：可自定义 JSON 序列化的值。 */
-    interface LuaJsonSerializable {
-        String toJsonString();
     }
 
     // ============================================================

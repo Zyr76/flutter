@@ -28,12 +28,12 @@ import java.util.WeakHashMap;
  *   <li>脚本里定义 {@code function onFlutterEvent(e)/收到Flutter事件(e) ... end} 接收 Dart 事件。</li>
  * </ul>
  *
- * <p>控件名（含中文）已注册为全局标识符，可直接写进布局表的首位，例如：
+ * <p>控件名已注册为全局标识符（Flutter 名字），可直接写进布局表的首位：
  * <pre>
  * 渲染Flutter{
- *   列, 间距=12, 内边距=16,
- *   { 文本, 文字="你好", 字号=20, 加粗=true },
- *   { 按钮, 文字="点我", 点击={call="ping"} },
+ *   Column, gap = 12, padding = 16,
+ *   { Text, text = "hi", fontSize = 20, fontWeight = "bold" },
+ *   { Button, text = "点我", onClick = { call = "ping" } },
  * }
  * </pre>
  */

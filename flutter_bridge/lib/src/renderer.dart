@@ -148,14 +148,17 @@ class Renderer {
         );
         break;
       case 'checkbox':
-        result = Checkbox(
-          value: props['value'] == true,
+        result = BridgeCheckbox(
+          key: _nodeKey(props),
+          initial: props['value'] == true,
+          color: _color(props['color']),
           onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
         );
         break;
       case 'slider':
-        result = Slider(
-          value: _num(props['value']) ?? 0,
+        result = BridgeSlider(
+          key: _nodeKey(props),
+          initial: _num(props['value']) ?? 0,
           min: _num(props['min']) ?? 0,
           max: _num(props['max']) ?? 1,
           onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
@@ -247,17 +250,18 @@ class Renderer {
         );
         break;
       case 'textfield' || 'edittext':
-        result = TextField(
-          decoration: InputDecoration(
-            hintText: props['hint']?.toString(),
-            labelText: props['label']?.toString(),
-          ),
+        result = BridgeTextField(
+          key: _nodeKey(props),
+          hint: props['hint']?.toString(),
+          label: props['label']?.toString(),
+          initial: props['text']?.toString(),
           onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
         );
         break;
       case 'switch':
-        result = Switch(
-          value: props['value'] == true,
+        result = BridgeSwitch(
+          key: _nodeKey(props),
+          initial: props['value'] == true,
           onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
         );
         break;
@@ -463,6 +467,11 @@ class Renderer {
     return null;
   }
 
+  static Key? _nodeKey(Map<String, dynamic> props) {
+    final id = props['id'] ?? props['key'];
+    return id == null ? null : ValueKey(id.toString());
+  }
+
   static WrapAlignment _wrapAlignment(dynamic v) {
     switch (v?.toString().toLowerCase()) {
       case 'center':
@@ -556,5 +565,126 @@ class Renderer {
       'person': Icons.person,
     };
     return icons[name?.toString().toLowerCase()] ?? Icons.widgets;
+  }
+}
+
+/// 以下为「有状态」交互控件：点击/拖动即时生效并带动效。
+/// Flutter 会复用相同位置的 State，所以整棵 Flutter 树重绘时，选中值/拖动值/输入内容不会丢。
+class BridgeSwitch extends StatefulWidget {
+  const BridgeSwitch({super.key, required this.initial, required this.onChanged});
+
+  final bool initial;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  State<BridgeSwitch> createState() => _BridgeSwitchState();
+}
+
+class _BridgeSwitchState extends State<BridgeSwitch> {
+  late bool _value = widget.initial;
+
+  @override
+  Widget build(BuildContext context) {
+    return Switch(
+      value: _value,
+      onChanged: (v) {
+        setState(() => _value = v);
+        widget.onChanged(v);
+      },
+    );
+  }
+}
+
+class BridgeCheckbox extends StatefulWidget {
+  const BridgeCheckbox({super.key, required this.initial, this.color, required this.onChanged});
+
+  final bool initial;
+  final Color? color;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  State<BridgeCheckbox> createState() => _BridgeCheckboxState();
+}
+
+class _BridgeCheckboxState extends State<BridgeCheckbox> {
+  late bool _value = widget.initial;
+
+  @override
+  Widget build(BuildContext context) {
+    return Checkbox(
+      value: _value,
+      activeColor: widget.color,
+      onChanged: (v) {
+        setState(() => _value = v == true);
+        widget.onChanged(v == true);
+      },
+    );
+  }
+}
+
+class BridgeSlider extends StatefulWidget {
+  const BridgeSlider({
+    super.key,
+    required this.initial,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+  });
+
+  final double initial;
+  final double min;
+  final double max;
+  final ValueChanged<double> onChanged;
+
+  @override
+  State<BridgeSlider> createState() => _BridgeSliderState();
+}
+
+class _BridgeSliderState extends State<BridgeSlider> {
+  late double _value = widget.initial;
+
+  @override
+  Widget build(BuildContext context) {
+    return Slider(
+      value: _value.clamp(widget.min, widget.max),
+      min: widget.min,
+      max: widget.max,
+      onChanged: (v) {
+        setState(() => _value = v);
+        widget.onChanged(v);
+      },
+    );
+  }
+}
+
+class BridgeTextField extends StatefulWidget {
+  const BridgeTextField({super.key, this.hint, this.label, this.initial, required this.onChanged});
+
+  final String? hint;
+  final String? label;
+  final String? initial;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<BridgeTextField> createState() => _BridgeTextFieldState();
+}
+
+class _BridgeTextFieldState extends State<BridgeTextField> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial ?? '');
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _controller,
+      decoration: InputDecoration(hintText: widget.hint, labelText: widget.label),
+      onChanged: widget.onChanged,
+    );
   }
 }
