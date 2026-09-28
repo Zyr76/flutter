@@ -20,6 +20,9 @@ class FlutterBridge {
   /// 给 Flutter 里嵌的原生 AndroidView 用的通道。
   static const MethodChannel nativeViewChannel = MethodChannel('androlua/nativeview');
 
+  /// 给 Flutter 里嵌的原生视频播放器（VideoView）用的通道。
+  static const MethodChannel videoChannel = MethodChannel('androlua/video');
+
   /// 当前渲染的 widget 树描述（JSON 字符串），由原生 `render` 写入。
   final ValueNotifier<String?> spec = ValueNotifier<String?>(null);
 
@@ -35,8 +38,46 @@ class FlutterBridge {
     if (_started) return;
     _started = true;
     registerDefaultHandlers(handlers);
+    _registerVideoHandlers();
     channel.setMethodCallHandler(_onMethodCall);
     nativeViewChannel.setMethodCallHandler(_onNativeViewCall);
+    videoChannel.setMethodCallHandler(_onVideoCall);
+  }
+
+  /// 视频播放器控制（供 Lua 通过 dartCall 调用）。
+  void _registerVideoHandlers() {
+    handlers['videoLoad'] = (a) {
+      video('load', a?['url']);
+      return {'ok': true};
+    };
+    handlers['videoPlay'] = (a) {
+      video('play');
+      return {'ok': true};
+    };
+    handlers['videoPause'] = (a) {
+      video('pause');
+      return {'ok': true};
+    };
+    handlers['videoSeek'] = (a) {
+      video('seek', (a?['pos'] as num?)?.toInt() ?? 0);
+      return {'ok': true};
+    };
+    handlers['videoSeekPercent'] = (a) {
+      final pct = (a?['percent'] ?? a?['value']) as num?;
+      video('seekPercent', pct?.toInt() ?? 0);
+      return {'ok': true};
+    };
+  }
+
+  /// 向原生视频播放器发指令。
+  void video(String method, [dynamic args]) {
+    videoChannel.invokeMethod<void>(method, args);
+  }
+
+  /// 原生视频播放器回传的事件（prepared / completion / error）。
+  Future<dynamic> _onVideoCall(MethodCall call) async {
+    emit('videoEvent', {'event': call.method, 'data': call.arguments});
+    return null;
   }
 
   /// Flutter 里嵌的 AndroidView（原生控件）回传的消息。

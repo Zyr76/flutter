@@ -182,7 +182,7 @@ class Renderer {
     }
     final w = props['width'];
     final h = props['height'];
-    if (w != null && _isFlex(w) || h != null && _isFlex(h)) {
+    if (w != null || h != null) {
       out = SizedBox(
         width: _dim(w),
         height: _dim(h),
@@ -191,8 +191,6 @@ class Renderer {
     }
     return out;
   }
-
-  static bool _isFlex(dynamic v) => v == 'fill' || v == 'match' || v == 'match_parent';
 
   static List<Widget> _children(dynamic raw) {
     if (raw is List) {
@@ -392,8 +390,9 @@ class Renderer {
     }
   }
 
-  static Alignment _alignment(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
+  static Alignment? _alignment(dynamic v) {
+    if (v == null) return null;
+    switch (v.toString().toLowerCase()) {
       case 'center':
         return Alignment.center;
       case 'topleft':
@@ -405,7 +404,7 @@ class Renderer {
       case 'bottomright':
         return Alignment.bottomRight;
       default:
-        return Alignment.center;
+        return null;
     }
   }
 
