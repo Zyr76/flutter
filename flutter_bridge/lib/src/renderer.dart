@@ -706,31 +706,44 @@ class Renderer {
     final action = onTap;
     return () {
       if (action is String) {
-        dynamic res = FlutterBridge.instance.invoke(action, fallback);
-        if (res is Future) res = null;
-        FlutterBridge.instance.emit('onTap', {'action': action, 'result': res});
+        // 字符串形式：只发事件，事件名 = 该名字（AndroLua 风格：点击调用同名 Lua 函数）
+        FlutterBridge.instance.emit(action, {'action': action});
       } else if (action is Map) {
         final m = action.cast<String, dynamic>();
         final method = (m['call'] ?? m['method'] ?? '').toString();
         final args = m['args'] is Map ? (m['args'] as Map).cast<String, dynamic>() : null;
-        dynamic res = method.isEmpty ? null : FlutterBridge.instance.invoke(method, args);
-        if (res is Future) res = null;
-        final event = (m['event'] ?? m['emit'] ?? 'onTap').toString();
-        FlutterBridge.instance.emit(event, {'action': method, 'args': args, 'result': res});
+        dynamic res;
+        if (method.isNotEmpty) {
+          // 若同名 Dart 方法存在就调用（不存在返回 error，不影响事件名）
+          res = FlutterBridge.instance.invoke(method, args);
+          if (res is Future) res = null;
+        }
+        // 事件名默认 = 方法名（而非固定 onTap），可用 event/事件 显式覆盖
+        final event = (m['event'] ?? m['emit'] ?? method).toString();
+        FlutterBridge.instance.emit(
+          event.isEmpty ? 'onTap' : event,
+          {'action': method, 'args': args, 'result': res},
+        );
       }
     };
   }
 
   static void _emit(dynamic spec, dynamic value, {Map<String, dynamic>? fallback}) {
-    final name = spec is Map ? (spec['event'] ?? spec['emit'])?.toString() : spec?.toString();
     final method = spec is Map ? (spec['call'] ?? spec['method'])?.toString() : null;
+    // 事件名：显式 event/emit > 字符串本身 > 方法名 > 'onChange'
+    final name = spec is Map
+        ? (spec['event'] ?? spec['emit'] ?? method)?.toString()
+        : spec?.toString();
     dynamic res;
     if (method != null && method.isNotEmpty) {
       final a = spec is Map ? spec['args'] : null;
       res = FlutterBridge.instance.invoke(method, a is Map ? a.cast<String, dynamic>() : null);
       if (res is Future) res = null;
     }
-    FlutterBridge.instance.emit(name ?? 'onChange', {'value': value, 'result': res});
+    FlutterBridge.instance.emit(
+      (name == null || name.isEmpty) ? 'onChange' : name,
+      {'value': value, 'result': res},
+    );
   }
 
   // ---------- 装饰 / 样式 ----------

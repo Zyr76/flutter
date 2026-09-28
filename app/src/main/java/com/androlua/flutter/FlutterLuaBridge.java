@@ -200,6 +200,19 @@ public final class FlutterLuaBridge {
                             callback.push();
                             LuaJson.pushJson(L, json);
                             L.pcall(1, 0, 0);
+                            return;
+                        }
+                        // AndroLua 风格：事件名 -> 同名全局 Lua 函数
+                        org.json.JSONObject o = new org.json.JSONObject(json);
+                        String name = o.optString("name", null);
+                        if (name == null || name.isEmpty()) {
+                            return;
+                        }
+                        LuaObject fn = L.getLuaObject(name);
+                        if (fn.isFunction()) {
+                            fn.push();
+                            LuaJson.pushJava(L, o.opt("data"));
+                            L.pcall(1, 0, 0);
                         }
                     } catch (Exception ignored) {
                     }

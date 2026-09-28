@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -154,5 +155,28 @@ void main() {
     expect(btn.onPressed, isNotNull); // 非禁用态（不是灰色、可点）
     await tester.tap(find.byType(ElevatedButton));
     await tester.pump();
+  });
+
+  testWidgets('点击回调：事件名 = 回调名（AndroLua 风格 onPressed={call="hello"}）', (tester) async {
+    final events = <Map<String, dynamic>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      FlutterBridge.channel,
+      (MethodCall call) async {
+        if (call.method == 'nativeEvent') {
+          events.add((jsonDecode(call.arguments as String) as Map).cast<String, dynamic>());
+        }
+        return null;
+      },
+    );
+    final w = Renderer.build(jsonEncode({
+      '1': 'ElevatedButton',
+      'onPressed': {'call': 'hello'},
+      'child': {'1': 'Text', 'text': '点我'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    await tester.tap(find.byType(ElevatedButton));
+    await tester.pump();
+    final hello = events.firstWhere((e) => e['name'] == 'hello');
+    expect((hello['data'] as Map)['action'], 'hello');
   });
 }

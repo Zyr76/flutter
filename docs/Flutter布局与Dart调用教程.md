@@ -154,22 +154,35 @@ activity.setContentView(渲染Flutter{
 
 ## 5. 事件与回调
 
-### 5.1 控件属性里的回调
+### 5.1 控件属性里的回调（AndroLua 风格）
 
-- **点击**：`onClick = { call = "Dart方法名", args = { ... } }`
-  - 先调用 Dart 方法，再把结果作为事件回传（事件名默认 `onTap`）。
-  - `onClick = "Dart方法名"`（参数为控件属性表）。
-  - 只发事件、不调方法：`onClick = { event = "自定义事件名" }`。
-- **变化**：`onChange = "事件名"` 或 `onChange = { event = "事件名", call = "Dart方法", args = {...} }`。
+- **点击**：
+  - `onClick = "hello"` —— 只发事件，**事件名就是 `hello`**；
+  - `onClick = { call = "getUserInfo", args = { ... } }` —— 调 Dart 方法，**事件名默认 = 方法名**（用 `event`/`事件` 可显式覆盖）；
+  - `onClick = { event = "custom" }` —— 只发指定事件名。
+- **变化**：`onChange = "事件名"` 或 `onChange = { call = "Dart方法", args = { ... } }`（事件名默认 = 方法名）。
 
-### 5.2 接收 Dart → Lua 事件
+### 5.2 接收事件（两种风格任选）
+
+**A. 同名 Lua 函数（最像 AndroLua，最简洁）**：
 
 ```lua
-function onFlutterEvent(e)     -- 也可写成 function 收到Flutter事件(e)
-  -- e.name = 事件名；e.data = 数据表
-  print(e.name, e.data.value)
+function hello(data)
+  print("按钮被点击了", data and data.action)
+end
+渲染Flutter{ ElevatedButton, onClick = "hello", child = { Text, text = "点我" } }
+```
+
+**B. 统一入口 onFlutterEvent / 收到Flutter事件**（优先级高于 A）：
+
+```lua
+function onFlutterEvent(e)
+  -- e.name 事件名；e.data 数据
+  print(e.name, e.data and e.data.action)
 end
 ```
+
+> 若定义了 `onFlutterEvent`，则它优先；否则按事件名找**同名全局 Lua 函数**并调用（参数为 `data`）。
 
 事件数据：
 
