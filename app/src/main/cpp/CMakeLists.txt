@@ -3,6 +3,10 @@ project(luajava)
 
 enable_language(C)
 
+# 允许中文标识符（Lua 词法 lctype.c 的 LUA_UCID 开关）：让 Lua 脚本能用
+# { 列, 文字="hi" }、渲染Flutter(...) 这类中文语法。
+add_compile_definitions(LUA_UCID)
+
 # 包含 Lua 头文件
 include_directories(lua)
 

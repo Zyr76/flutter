@@ -88,8 +88,119 @@ class Renderer {
       case 'expanded':
         result = Expanded(flex: _num(props['flex'] ?? props['weight'] ?? 1)?.round() ?? 1, child: child0());
         break;
-      case 'sizedbox' || 'spacer':
+      case 'sizedbox':
         result = SizedBox(width: _dim(props['width']), height: _dim(props['height']));
+        break;
+      case 'spacer':
+        result = Spacer(flex: _num(props['flex'] ?? props['weight'] ?? 1)?.round() ?? 1);
+        break;
+      case 'wrap':
+        result = Wrap(
+          spacing: _num(props['gap'] ?? props['spacing']) ?? 0,
+          runSpacing: _num(props['runSpacing']) ?? 0,
+          alignment: _wrapAlignment(props['alignment']),
+          children: children,
+        );
+        break;
+      case 'align':
+        result = Align(alignment: _alignment(props['alignment']) ?? Alignment.center, child: child0());
+        break;
+      case 'aspectratio':
+        result = AspectRatio(aspectRatio: _num(props['aspectRatio'] ?? props['ratio']) ?? 1.0, child: child0());
+        break;
+      case 'cliprrect':
+        result = ClipRRect(
+          borderRadius: BorderRadius.circular(_num(props['radius']) ?? 8),
+          child: child0(),
+        );
+        break;
+      case 'opacity':
+        result = Opacity(opacity: (_num(props['opacity']) ?? 1.0).clamp(0.0, 1.0), child: child0());
+        break;
+      case 'safearea':
+        result = SafeArea(child: child0());
+        break;
+      case 'positioned':
+        result = Positioned(
+          left: _dim(props['left']),
+          top: _dim(props['top']),
+          right: _dim(props['right']),
+          bottom: _dim(props['bottom']),
+          width: _dim(props['width']),
+          height: _dim(props['height']),
+          child: child0(),
+        );
+        break;
+      case 'circleavatar':
+        result = CircleAvatar(
+          radius: _num(props['radius']),
+          backgroundColor: _color(props['color'] ?? props['backgroundColor']),
+          child: children.isEmpty ? null : child0(),
+        );
+        break;
+      case 'chip':
+        result = Chip(label: Text((props['text'] ?? props['label'] ?? '').toString()));
+        break;
+      case 'selectabletext':
+        result = SelectableText(
+          (props['text'] ?? props['value'] ?? '').toString(),
+          textAlign: _textAlign(props['textAlign']),
+        );
+        break;
+      case 'checkbox':
+        result = Checkbox(
+          value: props['value'] == true,
+          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
+        );
+        break;
+      case 'slider':
+        result = Slider(
+          value: _num(props['value']) ?? 0,
+          min: _num(props['min']) ?? 0,
+          max: _num(props['max']) ?? 1,
+          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
+        );
+        break;
+      case 'circularprogressindicator':
+        result = Center(child: CircularProgressIndicator(value: _num(props['value'])));
+        break;
+      case 'linearprogressindicator':
+        result = LinearProgressIndicator(value: _num(props['value']));
+        break;
+      case 'iconbutton':
+        result = IconButton(
+          icon: Icon(_icon(props['icon'] ?? props['name']), color: _color(props['color'])),
+          onPressed: _voidCallback(props['onTap'], fallback: props),
+        );
+        break;
+      case 'floatingactionbutton':
+        result = FloatingActionButton(
+          onPressed: _voidCallback(props['onTap'], fallback: props),
+          child: Icon(_icon(props['icon'] ?? props['name'])),
+        );
+        break;
+      case 'gridview':
+        result = GridView.count(
+          crossAxisCount: _num(props['crossAxisCount'] ?? props['columns'])?.round() ?? 2,
+          mainAxisSpacing: _num(props['gap']) ?? 8,
+          crossAxisSpacing: _num(props['gap']) ?? 8,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: children,
+        );
+        break;
+      case 'listtile':
+        final lead = props['leading'] ?? props['icon'];
+        final title = props['title'] ?? props['text'];
+        result = ListTile(
+          leading: lead != null ? Icon(_icon(lead), color: _color(props['color'])) : null,
+          title: title != null ? Text(title.toString()) : null,
+          subtitle: props['subtitle'] != null
+              ? Text(props['subtitle'].toString(), style: const TextStyle(color: Colors.black54))
+              : null,
+          trailing: props['trailing'] != null ? Text(props['trailing'].toString()) : null,
+          onTap: _voidCallback(props['onTap'], fallback: props),
+        );
         break;
       case 'text':
         result = Text(
@@ -222,22 +333,28 @@ class Renderer {
         FlutterBridge.instance.emit('onTap', {'action': action, 'result': res});
       } else if (action is Map) {
         final m = action.cast<String, dynamic>();
-        final method = (m['call'] ?? m['method'] ?? '').toString();
-        final args = m['args'] is Map ? (m['args'] as Map).cast<String, dynamic>() : null;
+        final method = (m['call'] ?? m['method'] ?? m['方法'] ?? '').toString();
+        final args = (m['args'] ?? m['参数']) is Map
+            ? ((m['args'] ?? m['参数']) as Map).cast<String, dynamic>()
+            : null;
         final res = method.isEmpty ? null : FlutterBridge.instance.invoke(method, args);
-        FlutterBridge.instance.emit('onTap', {'action': method, 'args': args, 'result': res});
+        final event = (m['event'] ?? m['emit'] ?? m['事件'] ?? 'onTap').toString();
+        FlutterBridge.instance.emit(event, {'action': method, 'args': args, 'result': res});
       }
     };
   }
 
   static void _emit(dynamic spec, dynamic value, {Map<String, dynamic>? fallback}) {
-    final name = spec is Map ? (spec['event'] ?? spec['emit'])?.toString() : spec?.toString();
-    final method = spec is Map ? (spec['call'] ?? spec['method'])?.toString() : null;
+    final name = spec is Map
+        ? (spec['event'] ?? spec['emit'] ?? spec['事件'])?.toString()
+        : spec?.toString();
+    final method = spec is Map ? (spec['call'] ?? spec['method'] ?? spec['方法'])?.toString() : null;
     dynamic res;
     if (method != null && method.isNotEmpty) {
+      final a = spec is Map ? (spec['args'] ?? spec['参数']) : null;
       res = FlutterBridge.instance.invoke(
         method,
-        spec is Map && spec['args'] is Map ? (spec['args'] as Map).cast<String, dynamic>() : null,
+        a is Map ? a.cast<String, dynamic>() : null,
       );
     }
     FlutterBridge.instance.emit(
@@ -344,6 +461,22 @@ class Renderer {
     if (v is num) return v.toDouble();
     if (v is String) return double.tryParse(v);
     return null;
+  }
+
+  static WrapAlignment _wrapAlignment(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'center':
+        return WrapAlignment.center;
+      case 'end':
+      case 'right':
+        return WrapAlignment.end;
+      case 'spacebetween':
+        return WrapAlignment.spaceBetween;
+      case 'spacearound':
+        return WrapAlignment.spaceAround;
+      default:
+        return WrapAlignment.start;
+    }
   }
 
   static MainAxisAlignment _mainAxis(dynamic v) {

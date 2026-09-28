@@ -14,20 +14,28 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 /**
- * 把 Flutter 能力注册成 Lua 全局函数。
+ * 把 Flutter 能力注册成 Lua 全局函数，并提供「AndroLua 布局表」风格 + 中文语法的入口。
  *
- * <p>注册后的 Lua API：
+ * <p>注册后的 Lua API（ASCII 名 / 中文名都可用）：
  * <ul>
- *   <li>{@code flutterRender(spec [, container])} —— 用 widget 描述渲染 Flutter UI，返回 FlutterView；
- *       给了 container（ViewGroup）时顺带把 FlutterView 塞进去，实现原生区+Flutter 区同屏。</li>
- *   <li>{@code flutterView()} —— 返回复用的 FlutterView。</li>
- *   <li>{@code dartCall(name [, args])} —— 同步调用 Dart 逻辑方法并拿到返回（须在非主线程使用）。</li>
- *   <li>{@code dartCallAsync(name [, args], callback)} —— 异步调用，主线程可安全使用。</li>
- *   <li>{@code flutterEvent(name [, data])} —— 原生 -&gt; Flutter 事件。</li>
- *   <li>可在脚本里定义 {@code function onFlutterEvent(data) ... end} 接收 Dart -&gt; 原生 事件。</li>
+ *   <li>{@code flutterRender / 渲染Flutter / 加载Flutter布局} —— 渲染 Flutter UI，返回 FlutterView；
+ *       给了第二个参数（ViewGroup）时会顺带把 FlutterView 塞进去，实现原生区+Flutter 区同屏。</li>
+ *   <li>{@code flutterView / Flutter视图} —— 返回复用的 FlutterView。</li>
+ *   <li>{@code dartCall / 调用Dart} —— 调 Dart 逻辑方法。第三参给了函数则异步回调，否则同步返回
+ *       （同步须在非主线程，如 {@code thread{}} 里）。</li>
+ *   <li>{@code dartCallAsync / 异步调用Dart} —— 显式异步。</li>
+ *   <li>{@code flutterEvent / 发送Flutter事件} —— 原生 -> Flutter 事件。</li>
+ *   <li>脚本里定义 {@code function onFlutterEvent(e)/收到Flutter事件(e) ... end} 接收 Dart 事件。</li>
  * </ul>
  *
- * <p>引擎是懒创建的：脚本不用 Flutter 时不会有任何开销。
+ * <p>控件名（含中文）已注册为全局标识符，可直接写进布局表的首位，例如：
+ * <pre>
+ * 渲染Flutter{
+ *   列, 间距=12, 内边距=16,
+ *   { 文本, 文字="你好", 字号=20, 加粗=true },
+ *   { 按钮, 文字="点我", 点击={call="ping"} },
+ * }
+ * </pre>
  */
 public final class FlutterLuaBridge {
 
@@ -40,11 +48,15 @@ public final class FlutterLuaBridge {
     public static void register(final LuaState L, final LuaContext context) throws LuaException {
         STATES.put(context, L);
 
-        JavaFunction flutterRender = new JavaFunction(L) {
+        registerWidgetNames(L);
+
+        // ---- flutterRender(spec [, container]) ----
+        JavaFunction render = new JavaFunction(L) {
             @Override
             public int execute() throws LuaException {
                 FlutterLua flutter = flutter(context);
-                flutter.render(LuaJson.encode(L, 2));
+                String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
+                flutter.render(json);
 
                 LuaObject container = getParam(3);
                 View view = flutter.getView();
@@ -54,23 +66,58 @@ public final class FlutterLuaBridge {
                 return 1;
             }
         };
-        flutterRender.register("flutterRender");
+        reg(render, "flutterRender", "渲染Flutter", "加载Flutter布局", "Flutter布局");
 
-        JavaFunction flutterView = new JavaFunction(L) {
+        // ---- flutterView() ----
+        JavaFunction view = new JavaFunction(L) {
             @Override
             public int execute() throws LuaException {
                 L.pushJavaObject(flutter(context).getView());
                 return 1;
             }
         };
-        flutterView.register("flutterView");
+        reg(view, "flutterView", "Flutter视图");
 
-        JavaFunction dartCall = new JavaFunction(L) {
+        // ---- dartCall(name [, args] [, callback]) / 调用Dart ----
+        JavaFunction call = new JavaFunction(L) {
             @Override
             public int execute() throws LuaException {
-                FlutterLua flutter = flutter(context);
-                String name = L.toString(2);
-                String args = L.isNoneOrNil(3) ? null : LuaJson.encode(L, 3);
+                final FlutterLua flutter = flutter(context);
+                final String name = L.toString(2);
+                int top = L.getTop();
+
+                String args = null;
+                int cbIndex = -1;
+                if (top >= 4 && L.isFunction(4)) {
+                    cbIndex = 4;
+                    if (!L.isNoneOrNil(3)) {
+                        args = LuaJson.encode(L, 3);
+                    }
+                } else if (top >= 3 && L.isFunction(3)) {
+                    cbIndex = 3;
+                } else if (top >= 3 && !L.isNoneOrNil(3)) {
+                    args = LuaJson.encode(L, 3);
+                }
+
+                if (cbIndex > 0) {
+                    final LuaObject callback = getParam(cbIndex);
+                    flutter.callAsync(name, args, new FlutterLua.ResultCallback() {
+                        @Override
+                        public void onResult(Object result, String error) {
+                            synchronized (L) {
+                                try {
+                                    callback.push();
+                                    LuaJson.pushJava(L, result);
+                                    L.pushString(error);
+                                    L.pcall(2, 0, 0);
+                                } catch (Exception ignored) {
+                                }
+                            }
+                        }
+                    });
+                    return 0;
+                }
+
                 try {
                     LuaJson.pushJava(L, flutter.callSync(name, args));
                 } catch (IllegalStateException e) {
@@ -83,49 +130,10 @@ public final class FlutterLuaBridge {
                 return 1;
             }
         };
-        dartCall.register("dartCall");
+        reg(call, "dartCall", "调用Dart", "dartCallAsync", "异步调用Dart", "调用Dart异步");
 
-        JavaFunction dartCallAsync = new JavaFunction(L) {
-            @Override
-            public int execute() throws LuaException {
-                final FlutterLua flutter = flutter(context);
-                final String name = L.toString(2);
-
-                int callbackIndex;
-                String args;
-                if (L.isFunction(3)) {
-                    callbackIndex = 3;
-                    args = null;
-                } else {
-                    args = L.isNoneOrNil(3) ? null : LuaJson.encode(L, 3);
-                    callbackIndex = 4;
-                }
-
-                final LuaObject callback = getParam(callbackIndex);
-                if (!callback.isFunction()) {
-                    throw new LuaException("dartCallAsync: 缺少 callback");
-                }
-
-                flutter.callAsync(name, args, new FlutterLua.ResultCallback() {
-                    @Override
-                    public void onResult(Object result, String error) {
-                        synchronized (L) {
-                            try {
-                                callback.push();
-                                LuaJson.pushJava(L, result);
-                                L.pushString(error);
-                                L.pcall(2, 0, 0);
-                            } catch (Exception ignored) {
-                            }
-                        }
-                    }
-                });
-                return 0;
-            }
-        };
-        dartCallAsync.register("dartCallAsync");
-
-        JavaFunction flutterEvent = new JavaFunction(L) {
+        // ---- flutterEvent(name [, data]) ----
+        JavaFunction event = new JavaFunction(L) {
             @Override
             public int execute() throws LuaException {
                 String name = L.toString(2);
@@ -135,7 +143,21 @@ public final class FlutterLuaBridge {
                 return 0;
             }
         };
-        flutterEvent.register("flutterEvent");
+        reg(event, "flutterEvent", "发送Flutter事件", "原生发送事件");
+    }
+
+    /** 把控件名（含中文别名）注册成全局标识符，供布局表首位直接使用。 */
+    private static void registerWidgetNames(LuaState L) throws LuaException {
+        for (Map.Entry<String, String> e : LuaJson.TYPES.entrySet()) {
+            L.pushString(e.getValue());
+            L.setGlobal(e.getKey());
+        }
+    }
+
+    private static void reg(JavaFunction f, String... names) throws LuaException {
+        for (String n : names) {
+            f.register(n);
+        }
     }
 
     private static FlutterLua flutter(final LuaContext context) {
@@ -150,6 +172,9 @@ public final class FlutterLuaBridge {
                 synchronized (L) {
                     try {
                         LuaObject callback = L.getLuaObject("onFlutterEvent");
+                        if (!callback.isFunction()) {
+                            callback = L.getLuaObject("收到Flutter事件");
+                        }
                         if (callback.isFunction()) {
                             callback.push();
                             LuaJson.pushJson(L, json);

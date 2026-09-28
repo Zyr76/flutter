@@ -64,6 +64,14 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.apksig)
 
+    // AndroLua 可用的 Android 控件库（loadlayout 里 import 后即可用）
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0")
+    implementation("androidx.coordinatorlayout:coordinatorlayout:1.2.0")
+    implementation("androidx.fragment:fragment:1.8.5")
+
     // AndroLua + Flutter 桥：Flutter 模块（flutter_bridge）编译出的 AAR。
     // 需先执行 build_flutter_aar.sh / `cd flutter_bridge && flutter build aar` 生成本地仓库。
     debugImplementation("com.androlua.flutter_bridge:flutter_debug:1.0")
