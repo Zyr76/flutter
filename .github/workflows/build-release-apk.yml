@@ -32,10 +32,11 @@ jobs:
         run: |
           set -euo pipefail
           CM="$ANDROID_HOME/cmake/4.1.2"
-          mkdir -p "$CM"
           curl -fsSL -o /tmp/cmake.tar.gz \
             https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-x86_64.tar.gz
-          tar -xzf /tmp/cmake.tar.gz -C "$CM" --strip-components=1
+          sudo mkdir -p "$CM"
+          sudo tar -xzf /tmp/cmake.tar.gz -C "$CM" --strip-components=1
+          sudo chown -R "$(id -u):$(id -g)" "$CM"
           "$CM/bin/cmake" --version
 
       - name: Ensure debug keystore
