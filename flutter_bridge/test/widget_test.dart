@@ -135,4 +135,24 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
     expect(find.byType(LineChart), findsOneWidget);
   });
+
+  testWidgets('别名 onPressed 正确解析（按钮不能是禁用态）', (tester) async {
+    // 嵌套节点：Java 不会规范化，Dart 侧 Props 必须把 onPressed 归到 onTap
+    final w = Renderer.build(jsonEncode({
+      '1': 'Scaffold',
+      'body': {
+        '1': 'Center',
+        'child': {
+          '1': 'ElevatedButton',
+          'onPressed': {'call': 'hello'},
+          'child': {'1': 'Text', 'text': '点我'},
+        },
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: w));
+    final btn = tester.widget<ElevatedButton>(find.byType(ElevatedButton));
+    expect(btn.onPressed, isNotNull); // 非禁用态（不是灰色、可点）
+    await tester.tap(find.byType(ElevatedButton));
+    await tester.pump();
+  });
 }

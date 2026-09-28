@@ -73,13 +73,39 @@ class Props {
     return s;
   }
 
+  /// 规范化 -> 它的所有别名（反向索引）。渲染器读的都是规范键，需要靠它回退到用户写的别名。
+  static final Map<String, List<String>> _aliasesOf = _buildReverse();
+
+  static Map<String, List<String>> _buildReverse() {
+    final m = <String, List<String>>{};
+    kPropAliases.forEach((alias, canonical) {
+      (m[canonical] ??= <String>[]).add(alias);
+    });
+    return m;
+  }
+
   // ---------- 实例读取（含别名回退） ----------
 
   String get type => (map['type'] ?? map['t'] ?? '').toString().toLowerCase();
 
-  dynamic operator [](String k) => map[k] ?? map[kPropAliases[k]];
+  /// 读规范键；不存在时回退到任何指向它的别名键（onPressed/layout_width/gravity…）。
+  dynamic operator [](String k) {
+    final v = map[k];
+    if (v != null) return v;
+    final aliases = _aliasesOf[k];
+    if (aliases != null) {
+      for (final a in aliases) {
+        final av = map[a];
+        if (av != null) return av;
+      }
+    }
+    return null;
+  }
 
-  bool has(String k) => map.containsKey(k) || map.containsKey(kPropAliases[k]);
+  bool has(String k) {
+    if (map.containsKey(k)) return true;
+    return _aliasesOf[k]?.any(map.containsKey) ?? false;
+  }
 
   String? s(String k, [String? def]) {
     final v = this[k];
