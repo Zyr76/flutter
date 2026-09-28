@@ -183,6 +183,19 @@ local function env_import(env)
         return globalMT.__index({},_env)
     end
 
+    -- 保留 _env 原有的 __index（例如 Flutter 控件名兜底）作为最后回退，
+    -- 这样后续通过 import 导入的 Android 类不会被遮蔽。
+    local _prev = getmetatable(_env)
+    local _prevIndex = (type(_prev) == "table") and _prev.__index or nil
+    if _prevIndex ~= nil then
+        local _base = globalMT.__index
+        globalMT.__index = function(T, k)
+            local v = _base(T, k)
+            if v ~= nil then return v end
+            if type(_prevIndex) == "function" then return _prevIndex(T, k) end
+            return _prevIndex[k]
+        end
+    end
     setmetatable(_env, globalMT)
     for k, v in pairs(_M) do
         _env[k] = v

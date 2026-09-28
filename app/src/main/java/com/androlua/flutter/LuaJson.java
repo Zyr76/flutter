@@ -67,6 +67,15 @@ public final class LuaJson {
                 return L.toString(abs);
             case LuaState.LUA_TTABLE:
                 return tableToJava(L, abs);
+            case LuaState.LUA_TUSERDATA:
+                try {
+                    Object o = L.toJavaObject(abs);
+                    if (o != null) {
+                        return o;
+                    }
+                } catch (Throwable ignored) {
+                }
+                return L.toString(abs);
             default:
                 return L.toString(abs);
         }

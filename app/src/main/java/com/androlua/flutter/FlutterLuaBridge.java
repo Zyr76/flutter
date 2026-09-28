@@ -48,7 +48,7 @@ public final class FlutterLuaBridge {
     public static void register(final LuaState L, final LuaContext context) throws LuaException {
         STATES.put(context, L);
 
-        registerWidgetNames(L);
+        installWidgetFallback(L);
 
         // ---- flutterRender(spec [, container]) ----
         JavaFunction render = new JavaFunction(L) {
@@ -146,11 +146,32 @@ public final class FlutterLuaBridge {
         reg(event, "flutterEvent", "发送Flutter事件", "原生发送事件");
     }
 
-    /** 把控件名（含中文别名）注册成全局标识符，供布局表首位直接使用。 */
-    private static void registerWidgetNames(LuaState L) throws LuaException {
+    /**
+     * 给 _G 装一个「兜底 __index」：读取未定义的全局时，若是 Flutter 控件名就返回其名字字符串，
+     * 让布局表首位可直接写 {@code { Button, ... }}。
+     *
+     * <p>刻意「不抢占」全局名：只有当该名字在 _G 里不存在时才由这里兜底。这样一旦脚本
+     * {@code import "android.widget.*"} 导入了同名 Android 类（Button/Switch/ListView/GridView 等），
+     * 原生 loadlayout 依然能拿到真正的类，不会被字符串遮蔽。
+     */
+    private static void installWidgetFallback(LuaState L) throws LuaException {
+        StringBuilder entries = new StringBuilder();
         for (Map.Entry<String, String> e : LuaJson.TYPES.entrySet()) {
-            L.pushString(e.getValue());
-            L.setGlobal(e.getKey());
+            entries.append('[').append('"').append(e.getKey()).append('"').append(']')
+                    .append('=').append('"').append(e.getValue()).append('"').append(',');
+        }
+        String chunk = "local w = {" + entries + "}\n"
+                + "local mt = getmetatable(_G)\n"
+                + "local prev = (type(mt) == 'table') and mt.__index or nil\n"
+                + "setmetatable(_G, { __index = function(t, k)\n"
+                + "    local v = w[k]\n"
+                + "    if v ~= nil then return v end\n"
+                + "    if type(prev) == 'function' then return prev(t, k) end\n"
+                + "    if type(prev) == 'table' then return prev[k] end\n"
+                + "  end })";
+        int ok = L.LdoString(chunk);
+        if (ok != 0) {
+            throw new LuaException("安装 Flutter 控件名兜底失败: " + L.toString(-1));
         }
     }
 

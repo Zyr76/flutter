@@ -53,6 +53,10 @@ activity.setContentView(渲染Flutter{
 
 字符串子节点会被当作 `Text`：`{ Column, "第一行", "第二行" }`。
 
+> 控件名是「兜底全局」：仅当该名字未被定义时才解析为 Flutter 控件名。若脚本
+> `import "android.widget.*"` 导入了同名 Android 类（`Button`/`Switch`/`ListView`/`GridView` 等），
+> 则同名标识符会解析为那个类，**原生 loadlayout 依旧可用**；Flutter 布局写 `Button` 也会自动映射到 Flutter 的 `Button`。
+
 ---
 
 ## 3. 控件一览（Flutter 名字）
