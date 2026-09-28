@@ -87,6 +87,24 @@ activity.setContentView(渲染Flutter{
 | `Divider` | — |
 | `LinearProgressIndicator` / `CircularProgressIndicator` | value |
 | `AndroidView` | viewType（Flutter 里嵌 Android 控件） |
+| `OutlinedButton` | 描边按钮 |
+| `Scaffold` | 页面骨架（槽：appBar/body/drawer/endDrawer/bottomNavigationBar/floatingActionButton/backgroundColor） |
+| `AppBar` | 顶栏（title/leading/actions/elevation/backgroundColor/foregroundColor/centerTitle） |
+| `Drawer` / `UserAccountsDrawerHeader` | 抽屉 / 账户头部（accountName/accountEmail/currentAccountPicture/decoration） |
+| `BottomNavigationBar` | 底部导航（items=列表；有状态、点选即时生效） |
+| `TabBar` / `TabBarView` / `DefaultTabController` | 标签页（tabs=列表，DefaultTabController 提供 length） |
+| `SingleChildScrollView` | 可滚动容器（scrollDirection/physics） |
+| `InkWell` / `GestureDetector` | 点击响应（onTap/onPressed） |
+| `Transform` | 位移变换（translate = {dx, dy}） |
+| `FractionallySizedBox` | 按比例占位（widthFactor/heightFactor） |
+| `DropdownButton` / `DropdownButtonFormField` | 下拉选择（items/value，有状态） |
+
+**通用属性/插槽绑定**（尽量自适应）：
+
+- `child` 与 `children`、位置子项等价；`appBar`/`body`/`drawer`/`bottomNavigationBar`/`leading`/`title`/`actions`/`items`/`tabs`/`currentAccountPicture` 等插槽自动解析（给 widget 描述就用它，给字符串当 `Text`/`Icon`）。
+- `decoration` 支持 `color`/`radius`/`border`/`borderBottom`/`gradient`/`boxShadow`；`style`（按钮背景色/前景色/内边距/高度/圆角）；`onPressed`=`onTap`；`physics`；`shadowColor`。
+- **容错**：单个节点构建失败只会在该处显示一行红色提示，不会整屏白；未识别的控件优雅降级（有子项当 `Column`，否则当 `Text`，再无则忽略）。
+- **可扩展**：Dart 里 `Renderer.register('MyWidget', (props) => ...)` 可注册自定义/第三方控件。
 
 > `Checkbox` / `Switch` / `Slider` / `TextField` 是**有状态**控件：点击/拖动即时生效并带动效，
 > 整页重绘时也会保留选中值/拖动值/输入内容（相同位置会复用状态；需要稳定身份时给控件加 `id`）。
@@ -252,6 +270,7 @@ Android 整包（原生 CMake + Chaquopy）用 GitHub Actions 出 release APK：
 
 ## 11. 限制与注意事项
 
+- **“自适应”的上限**：Flutter 的 release(AOT) **没有反射**（`dart:mirrors` 不支持 AOT），无法凭字符串创建任意 Flutter 控件；渲染器能覆盖的是**注册过的控件名**（目前为 Material 常用控件），其余会容错降级。要加新控件：Dart 里 `Renderer.register(...)`，或在 `renderer.dart` 加一个 case。
 - `渲染Flutter` 是中文标识符，依赖 Lua 词法的 `LUA_UCID`（已在 `app/src/main/cpp/CMakeLists.txt` 打开），
   会重编原生库生效。若不想用中文入口，直接用 `flutterRender` 即可。
 - `Checkbox` / `Switch` / `Slider` 为有状态控件，交互与动效正常；列表/表单里建议给稳定 `id`。

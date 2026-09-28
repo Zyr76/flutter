@@ -4,6 +4,8 @@
 // `dynamic Function(Map<String, dynamic>? args)`，
 // 返回值必须是可 JSON 序列化的对象（Map / List / num / String / bool / null）。
 
+import 'renderer.dart';
+
 void registerDefaultHandlers(
   Map<String, dynamic Function(Map<String, dynamic>? args)> handlers,
 ) {
@@ -31,6 +33,19 @@ void registerDefaultHandlers(
     final n = (args?['n'] as num?)?.toInt() ?? 0;
     return {'n': n, 'value': _fib(n)};
   };
+
+  // 打开/关闭当前 Scaffold 的抽屉（供 Lua 的 onClick={call="openDrawer"} 使用）
+  handlers['openDrawer'] = (args) {
+    Renderer.scaffoldKey.currentState?.openDrawer();
+    return {'ok': true};
+  };
+  handlers['closeDrawer'] = (args) {
+    Renderer.scaffoldKey.currentState?.closeDrawer();
+    return {'ok': true};
+  };
+
+  // 回显：便于前端调试时确认参数
+  handlers['echo'] = (args) => {'echo': args};
 }
 
 int _fib(int n) {

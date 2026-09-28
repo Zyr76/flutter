@@ -302,7 +302,7 @@ public final class LuaJson {
         alias("margin", "layout_margin");
         alias("radius", "borderRadius", "cornerRadius");
         alias("alignment", "layout_gravity", "gravity", "align");
-        alias("onTap", "onClick", "click");
+        alias("onTap", "onClick", "click", "onPressed");
         alias("onChange", "onChanged");
         alias("gap", "spacing");
         alias("text", "value");
@@ -332,11 +332,16 @@ public final class LuaJson {
         String[] names = {
                 "Column", "Row", "Stack", "Container", "Padding", "Center", "Expanded",
                 "SizedBox", "Spacer", "Text", "SelectableText", "Button", "ElevatedButton",
-                "TextButton", "FilledButton", "IconButton", "FloatingActionButton", "Icon",
-                "Image", "Card", "ListView", "GridView", "Wrap", "Align", "AspectRatio",
+                "TextButton", "FilledButton", "OutlinedButton", "IconButton", "FloatingActionButton",
+                "Icon", "Image", "Card", "ListView", "GridView", "Wrap", "Align", "AspectRatio",
                 "ClipRRect", "Opacity", "SafeArea", "Positioned", "CircleAvatar", "Chip",
                 "Checkbox", "Slider", "Switch", "TextField", "Divider",
-                "CircularProgressIndicator", "LinearProgressIndicator", "ListTile", "AndroidView"
+                "CircularProgressIndicator", "LinearProgressIndicator", "ListTile", "AndroidView",
+                // Scaffold 体系与常用控件
+                "Scaffold", "AppBar", "Drawer", "UserAccountsDrawerHeader",
+                "BottomNavigationBar", "BottomNavigationBarItem", "TabBar", "Tab", "TabBarView",
+                "DefaultTabController", "SingleChildScrollView", "InkWell", "GestureDetector",
+                "Transform", "FractionallySizedBox", "DropdownButton", "DropdownButtonFormField"
         };
         for (String n : names) {
             TYPES.put(n, n);

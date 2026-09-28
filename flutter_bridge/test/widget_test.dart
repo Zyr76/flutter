@@ -1,4 +1,6 @@
 // Dart 逻辑层与渲染器的基本单元测试（不依赖平台通道）。
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -39,5 +41,27 @@ void main() {
     await tester.tap(find.byType(Checkbox));
     await tester.pumpAndSettle();
     expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, true);
+  });
+
+  testWidgets('Material 控件：Scaffold/AppBar/BottomNavigationBar', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      'type': 'Scaffold',
+      'appBar': {
+        'type': 'AppBar',
+        'title': {'type': 'Text', 'text': '标题'},
+      },
+      'body': {'type': 'Text', 'text': '内容'},
+      'bottomNavigationBar': {
+        'type': 'BottomNavigationBar',
+        'items': [
+          {'icon': 'home', 'label': '首页'},
+          {'icon': 'person', 'label': '我的'},
+        ],
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: w));
+    expect(find.text('标题'), findsOneWidget);
+    expect(find.text('内容'), findsOneWidget);
+    expect(find.text('首页'), findsOneWidget);
   });
 }
