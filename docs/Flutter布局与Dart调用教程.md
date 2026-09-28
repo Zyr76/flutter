@@ -98,8 +98,25 @@ activity.setContentView(渲染Flutter{
 | `Transform` | 位移变换（translate = {dx, dy}） |
 | `FractionallySizedBox` | 按比例占位（widthFactor/heightFactor） |
 | `DropdownButton` / `DropdownButtonFormField` | 下拉选择（items/value，有状态） |
+| `QrCode` / `QrImage` | 二维码（data/size/color/background） |
+| `FlutterMap`（别名 `Map`） | 地图（center={lat,lng}/zoom/markers/tileUrl，默认 OSM 瓦片、无需 Key） |
+| `Chart` / `LineChart` / `BarChart` / `PieChart` | 图表（chartType + series，fl_chart） |
+| `VideoPlayer`（别名 `Video`） | 视频播放（url/autoPlay/loop/controls，video_player） |
+| `AudioPlayer`（别名 `Audio`） | 音频播放（url/title/autoPlay，just_audio，带进度条） |
 
-**通用属性/插槽绑定**（尽量自适应）：
+**统一属性处理器 [Props]**：所有控件都经它读取属性——负责归一化（规范化节点 / AndroLua 表风格）、别名（`onPressed`=`onTap`、`layout_width`=`width`、`gravity`=`alignment`…）、类型转换（颜色/尺寸/边距/对齐/渐变/边框/图标…）与类型化读取（`p.n('gap')`/`p.color('color')`/`p.inset('padding')`）。加新控件时只需在 `renderer.dart` 加一个 case。
+
+**列表（ListView.builder 懒加载）**：
+```lua
+-- 模板式懒加载：itemTemplate 里的 $index 会替换为下标，按需构建
+渲染Flutter{ ListView, itemCount = 1000, itemTemplate =
+  { ListTile, title = { Text, text = "第 $index 项" } } }
+-- 或直接给 children（也走 builder）
+渲染Flutter{ ListView, children = { { Text, text="A" }, { Text, text="B" } } }
+```
+
+**Dart 逻辑层**（`flutter_bridge/lib/src/logic.dart`，可自行加）：`ping` `echo` `getUserInfo` `add` `toUpper` `fib` `openDrawer` `closeDrawer` `now` `uuid` `randomInt` `sleep` `jsonEncode` `jsonDecode` `base64Encode` `base64Decode` `httpGet` `httpPost` `login` `fetchOrders` `saveProfile`。handler 可返回 `Future`（经 `dartCall` 自动 await；`onTap` 这类 UI 回调不等异步）。
+
 
 - `child` 与 `children`、位置子项等价；`appBar`/`body`/`drawer`/`bottomNavigationBar`/`leading`/`title`/`actions`/`items`/`tabs`/`currentAccountPicture` 等插槽自动解析（给 widget 描述就用它，给字符串当 `Text`/`Icon`）。
 - `decoration` 支持 `color`/`radius`/`border`/`borderBottom`/`gradient`/`boxShadow`；`style`（按钮背景色/前景色/内边距/高度/圆角）；`onPressed`=`onTap`；`physics`；`shadowColor`。

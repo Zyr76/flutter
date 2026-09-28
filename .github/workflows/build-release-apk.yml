@@ -25,7 +25,11 @@ jobs:
           cache: true
 
       - name: Accept Android SDK licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+        run: |
+          SDK="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDK" --licenses > /dev/null 2>&1 || true
+          # 装插件可能用到的 CMake 3.22.1（jni 等原生插件硬编码此版本）
+          "$SDK" "cmake;3.22.1" "platforms;android-36" "build-tools;35.0.0" > /dev/null 2>&1 || true
 
       - name: Install CMake 4.1.2 into Android SDK
         # 项目的 CMakeLists 要求 >= 4.1.2，而 sdkmanager 只提供到 3.31.x，故手动放入 SDK

@@ -1,21 +1,28 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:video_player/video_player.dart';
 
 import 'bridge.dart';
+import 'props.dart';
 
 /// 把 Lua 传来的 widget 描述（JSON/UISpec）转成 Flutter widget 树。
 ///
 /// 设计目标：**尽量自适应**。
-///  * 注册表驱动：内置 Material 常用控件；未知控件优雅降级；
-///  * 通用属性绑定：child/children/appBar/body/items/leading/title/actions/
-///    decoration/style/onPressed 等插槽与属性统一解析；
+///  * 统一属性处理器 [Props]：归一 + 别名 + 类型转换；
+///  * 注册表驱动：内置 Material/常用控件；未知控件优雅降级；`Renderer.register` 可扩展；
 ///  * 容错：单个节点构建失败只影响该节点，不会整屏白；
-///  * 可扩展：`Renderer.register(name, builder)` 可加自定义控件。
+///  * 列表用 `ListView.builder`：支持模板式懒加载（`itemTemplate` + `$index`）。
 ///
-/// 说明：Flutter 的 release(AOT) 没有反射（dart:mirrors 不支持 AOT），
-/// 所以无法凭字符串创建任意 Flutter 控件；能覆盖的是「注册过的控件名」。
+/// 说明：Flutter release(AOT) 无反射（dart:mirrors 不支持 AOT），无法凭字符串创建
+/// 任意 Flutter 控件；能覆盖的是「注册过的控件名」。
 class Renderer {
   /// 兜底用的 Scaffold key（便于 Lua 通过 Dart 方法打开抽屉）。
   static final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
@@ -46,7 +53,6 @@ class Renderer {
     try {
       return _buildInner(spec);
     } catch (e) {
-      // 单个节点出错不影响其它节点
       return Padding(
         padding: const EdgeInsets.all(4),
         child: Text('⚠ 节点渲染失败: $e', style: const TextStyle(color: Colors.red, fontSize: 11)),
@@ -59,131 +65,134 @@ class Renderer {
     if (spec is String) return Text(spec);
     if (spec is num || spec is bool) return Text('$spec');
     if (spec is List) {
-      // 数组式：{ Widget, ...子节点 }
       if (spec.isEmpty) return null;
-      return _buildInner(<String, dynamic>{'type': _typeName(spec.first), 'children': spec.sublist(1)});
+      return _buildInner(<String, dynamic>{'type': Props.typeName(spec.first), 'children': spec.sublist(1)});
     }
     if (spec is! Map) return const SizedBox.shrink();
 
-    final props = _props(spec);
-    final type = (props['type'] ?? props['t'] ?? '').toString().toLowerCase();
-    final children = _children(props['children'] ?? props['child']);
-
+    final p = Props.of(spec);
+    final children = _children(p['children'] ?? p['child']);
     Widget child0() => children.isNotEmpty ? children.first : const SizedBox.shrink();
 
-    final ext = custom[type];
+    final ext = custom[p.type];
     if (ext != null) {
-      return _wrapCommon(ext(props), props);
+      return _wrapCommon(ext(p.map), p);
     }
 
     Widget result;
-    switch (type) {
+    switch (p.type) {
       // ---------- 布局 ----------
       case 'column':
         result = Column(
-          mainAxisAlignment: _mainAxis(props['mainAxisAlignment'] ?? props['gravity']),
-          crossAxisAlignment: _crossAxis(props['crossAxisAlignment']),
-          mainAxisSize: _size(props['mainAxisSize']),
-          spacing: _num(props['gap'] ?? props['spacing']) ?? 0,
+          mainAxisAlignment: Props.toMainAxis(p['mainAxisAlignment'] ?? p['gravity']),
+          crossAxisAlignment: Props.toCrossAxis(p['crossAxisAlignment']),
+          mainAxisSize: Props.toMainAxisSize(p['mainAxisSize']),
+          spacing: p.nz('gap'),
           children: children,
         );
         break;
       case 'row':
         result = Row(
-          mainAxisAlignment: _mainAxis(props['mainAxisAlignment'] ?? props['gravity']),
-          crossAxisAlignment: _crossAxis(props['crossAxisAlignment']),
-          mainAxisSize: _size(props['mainAxisSize']),
-          spacing: _num(props['gap'] ?? props['spacing']) ?? 0,
+          mainAxisAlignment: Props.toMainAxis(p['mainAxisAlignment'] ?? p['gravity']),
+          crossAxisAlignment: Props.toCrossAxis(p['crossAxisAlignment']),
+          mainAxisSize: Props.toMainAxisSize(p['mainAxisSize']),
+          spacing: p.nz('gap'),
           children: children,
         );
         break;
       case 'stack':
         result = Stack(
-          alignment: _alignment(props['alignment']) ?? AlignmentDirectional.topStart,
+          alignment: p.align('alignment') ?? AlignmentDirectional.topStart,
+          fit: p.s('fit')?.toLowerCase() == 'expand' ? StackFit.expand : StackFit.loose,
           children: children,
         );
         break;
       case 'container':
         result = Container(
-          width: _dim(props['width']),
-          height: _dim(props['height']),
-          alignment: _alignment(props['alignment']),
-          padding: _insets(props['padding']),
-          margin: _insets(props['margin']),
-          decoration: _decoration(props),
+          width: Props.dim(p['width']),
+          height: Props.dim(p['height']),
+          alignment: p.align('alignment'),
+          padding: p.inset('padding'),
+          margin: p.inset('margin'),
+          decoration: _decoration(p),
+          clipBehavior: p.b('clip') ? Clip.antiAlias : Clip.none,
           child: child0(),
         );
         break;
       case 'padding':
-        result = Padding(padding: _insets(props['padding']) ?? EdgeInsets.zero, child: child0());
+        result = Padding(padding: p.inset('padding') ?? EdgeInsets.zero, child: child0());
         break;
       case 'center':
         result = Center(child: child0());
         break;
       case 'expanded':
-        result = Expanded(flex: _num(props['flex'] ?? props['weight'] ?? 1)?.round() ?? 1, child: child0());
+        result = Expanded(flex: p.i('flex') ?? p.i('weight') ?? 1, child: child0());
         break;
       case 'sizedbox':
-        result = SizedBox(width: _dim(props['width']), height: _dim(props['height']), child: children.isEmpty ? null : child0());
+        result = SizedBox(
+          width: Props.dim(p['width']),
+          height: Props.dim(p['height']),
+          child: children.isEmpty ? null : child0(),
+        );
         break;
       case 'spacer':
-        result = Spacer(flex: _num(props['flex'] ?? props['weight'] ?? 1)?.round() ?? 1);
+        result = Spacer(flex: p.i('flex') ?? p.i('weight') ?? 1);
         break;
       case 'wrap':
         result = Wrap(
-          spacing: _num(props['gap'] ?? props['spacing']) ?? 0,
-          runSpacing: _num(props['runSpacing']) ?? 0,
-          alignment: _wrapAlignment(props['alignment']),
+          spacing: p.nz('gap'),
+          runSpacing: p.nz('runSpacing'),
+          alignment: Props.toWrapAlignment(p['alignment']),
           children: children,
         );
         break;
       case 'align':
-        result = Align(alignment: _alignment(props['alignment']) ?? Alignment.center, child: child0());
+        result = Align(alignment: p.align('alignment') ?? Alignment.center, child: child0());
         break;
       case 'aspectratio':
-        result = AspectRatio(aspectRatio: _num(props['aspectRatio'] ?? props['ratio']) ?? 1.0, child: child0());
+        result = AspectRatio(aspectRatio: p.n('aspectRatio') ?? p.n('ratio') ?? 1.0, child: child0());
         break;
       case 'cliprrect':
         result = ClipRRect(
-          borderRadius: BorderRadius.circular(_num(props['radius']) ?? 8),
+          borderRadius: BorderRadius.circular(p.n('radius') ?? 8),
           child: child0(),
         );
         break;
       case 'opacity':
-        result = Opacity(opacity: (_num(props['opacity']) ?? 1.0).clamp(0.0, 1.0), child: child0());
+        result = Opacity(opacity: (p.n('opacity') ?? 1.0).clamp(0.0, 1.0), child: child0());
         break;
       case 'safearea':
         result = SafeArea(child: child0());
         break;
       case 'positioned':
         result = Positioned(
-          left: _dim(props['left']),
-          top: _dim(props['top']),
-          right: _dim(props['right']),
-          bottom: _dim(props['bottom']),
-          width: _dim(props['width']),
-          height: _dim(props['height']),
+          left: Props.dim(p['left']),
+          top: Props.dim(p['top']),
+          right: Props.dim(p['right']),
+          bottom: Props.dim(p['bottom']),
+          width: Props.dim(p['width']),
+          height: Props.dim(p['height']),
           child: child0(),
         );
         break;
       case 'fractionallysizedbox':
         result = FractionallySizedBox(
-          widthFactor: _num(props['widthFactor']),
-          heightFactor: _num(props['heightFactor']),
-          alignment: _alignment(props['alignment']) ?? Alignment.centerLeft,
+          widthFactor: p.n('widthFactor'),
+          heightFactor: p.n('heightFactor'),
+          alignment: p.align('alignment') ?? Alignment.centerLeft,
           child: child0(),
         );
         break;
       case 'singlechildscrollview':
         result = SingleChildScrollView(
-          scrollDirection: _axis(props['scrollDirection']),
-          physics: _physics(props['physics']),
-          padding: _insets(props['padding']),
+          scrollDirection: p.axis('scrollDirection'),
+          physics: Props.toPhysics(p['physics']),
+          padding: p.inset('padding'),
           child: child0(),
         );
         break;
       case 'transform':
-        final t = props['translate'];
+        final t = p['translate'];
         final off = t is List && t.length >= 2
             ? Offset((t[0] as num).toDouble(), (t[1] as num).toDouble())
             : Offset.zero;
@@ -193,256 +202,280 @@ class Renderer {
       // ---------- 文本 / 图片 / 图标 ----------
       case 'text':
         result = Text(
-          (props['text'] ?? props['value'] ?? '').toString(),
-          textAlign: _textAlign(props['textAlign']),
-          style: _textStyle(props),
-          maxLines: _num(props['maxLines'])?.round(),
-          overflow: _num(props['maxLines']) != null ? TextOverflow.ellipsis : null,
+          (p['text'] ?? p['value'] ?? '').toString(),
+          textAlign: Props.toTextAlign(p['textAlign']),
+          style: Props.toTextStyle(p),
+          maxLines: p.i('maxLines'),
+          overflow: p.i('maxLines') != null ? TextOverflow.ellipsis : null,
         );
         break;
       case 'selectabletext':
         result = SelectableText(
-          (props['text'] ?? props['value'] ?? '').toString(),
-          textAlign: _textAlign(props['textAlign']),
-          style: _textStyle(props),
+          (p['text'] ?? p['value'] ?? '').toString(),
+          textAlign: Props.toTextAlign(p['textAlign']),
+          style: Props.toTextStyle(p),
         );
         break;
       case 'icon':
-        result = Icon(_icon(props['icon'] ?? props['name']), color: _color(props['color']), size: _num(props['size']));
+        result = Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color'), size: p.n('size'));
         break;
       case 'image':
-        final url = props['url'] ?? props['src'] ?? props['asset'];
-        result = url != null
-            ? Image.network(url.toString(), width: _dim(props['width']), height: _dim(props['height']), fit: BoxFit.cover)
-            : const SizedBox.shrink();
+        final url = p['url'] ?? p['src'] ?? p['asset'];
+        if (url == null) {
+          result = const SizedBox.shrink();
+        } else {
+          final u = url.toString();
+          result = u.startsWith('http')
+              ? Image.network(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: BoxFit.cover)
+              : Image.asset(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: BoxFit.cover);
+        }
         break;
 
       // ---------- 按钮 ----------
       case 'button' || 'elevatedbutton' || 'textbutton' || 'filledbutton' || 'outlinedbutton':
-        final label = (props['text'] ?? props['label'] ?? 'Button').toString();
-        final onTap = _voidCallback(props['onTap'] ?? props['onPressed'] ?? props['onClick'], fallback: props);
-        final style = _buttonStyle(props);
-        final child = _widgetOrText(props['child'], label);
+        final label = (p['text'] ?? p['label'] ?? 'Button').toString();
+        final onTap = _voidCallback(p['onTap'], fallback: p.map);
+        final style = _buttonStyle(p);
+        final child = _widgetOrText(p['child'], label);
         result = Padding(
-          padding: _insets(props['padding']) ?? EdgeInsets.zero,
-          child: type == 'textbutton'
+          padding: p.inset('padding') ?? EdgeInsets.zero,
+          child: p.type == 'textbutton'
               ? TextButton(onPressed: onTap, style: style, child: child)
-              : type == 'outlinedbutton'
+              : p.type == 'outlinedbutton'
                   ? OutlinedButton(onPressed: onTap, style: style, child: child)
-                  : type == 'filledbutton'
+                  : p.type == 'filledbutton'
                       ? FilledButton(onPressed: onTap, style: style, child: child)
                       : ElevatedButton(onPressed: onTap, style: style, child: child),
         );
         break;
       case 'iconbutton':
         result = IconButton(
-          icon: Icon(_icon(props['icon'] ?? props['name']), color: _color(props['color'])),
-          onPressed: _voidCallback(props['onTap'] ?? props['onPressed'], fallback: props),
+          icon: Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color')),
+          onPressed: _voidCallback(p['onTap'], fallback: p.map),
         );
         break;
       case 'floatingactionbutton':
         result = FloatingActionButton(
-          onPressed: _voidCallback(props['onTap'] ?? props['onPressed'], fallback: props),
-          backgroundColor: _color(props['color'] ?? props['backgroundColor']),
-          child: Icon(_icon(props['icon'] ?? props['name'])),
+          onPressed: _voidCallback(p['onTap'], fallback: p.map),
+          backgroundColor: p.color('color') ?? p.color('backgroundColor'),
+          child: Icon(Props.toIcon(p['icon'] ?? p['name'])),
         );
         break;
 
       // ---------- 容器类 ----------
       case 'card':
         result = Card(
-          elevation: _num(props['elevation']) ?? 1,
-          color: _color(props['color']) ?? _decoration(props)?.color,
-          shadowColor: _color(props['shadowColor']),
-          margin: _insets(props['margin']) ?? const EdgeInsets.all(4),
-          shape: _num(props['radius']) != null
-              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(_num(props['radius'])!))
+          elevation: p.n('elevation') ?? 1,
+          color: p.color('color') ?? _decoration(p)?.color,
+          shadowColor: p.color('shadowColor'),
+          margin: p.inset('margin') ?? const EdgeInsets.all(4),
+          shape: p.n('radius') != null
+              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(p.n('radius')!))
               : null,
           child: Padding(
-            padding: _insets(props['padding']) ?? const EdgeInsets.all(12),
+            padding: p.inset('padding') ?? const EdgeInsets.all(12),
             child: child0(),
           ),
         );
         break;
       case 'circleavatar':
         result = CircleAvatar(
-          radius: _num(props['radius']),
-          backgroundColor: _color(props['color'] ?? props['backgroundColor']),
+          radius: p.n('radius') ?? p.n('size'),
+          backgroundColor: p.color('color') ?? p.color('backgroundColor'),
           child: children.isEmpty ? null : child0(),
         );
         break;
       case 'chip':
-        result = Chip(label: Text((props['text'] ?? props['label'] ?? '').toString()));
+        result = Chip(label: Text((p['text'] ?? p['label'] ?? '').toString()));
         break;
       case 'listtile':
         result = ListTile(
-          leading: _slotIcon(props['leading']),
-          title: _slotText(props['title'] ?? props['text']),
-          subtitle: _slotText(props['subtitle']),
-          trailing: _slotText(props['trailing']),
-          onTap: _voidCallback(props['onTap'] ?? props['onPressed'], fallback: props),
+          leading: _slotIcon(p['leading']),
+          title: _slotText(p['title'] ?? p['text']),
+          subtitle: _slotText(p['subtitle']),
+          trailing: _slotText(p['trailing']),
+          onTap: _voidCallback(p['onTap'], fallback: p.map),
         );
         break;
 
-      // ---------- 滚动 ----------
-      case 'listview' || 'list':
-        result = ListView(
-          shrinkWrap: props['shrinkWrap'] == true,
-          physics: _physics(props['physics']),
-          padding: _insets(props['padding']),
-          children: children,
-        );
+      // ---------- 滚动 / 列表 ----------
+      case 'listview' || 'list' || 'listviewbuilder':
+        result = _listView(p, children);
         break;
       case 'gridview':
         result = GridView.count(
-          crossAxisCount: _num(props['crossAxisCount'] ?? props['columns'])?.round() ?? 2,
-          mainAxisSpacing: _num(props['gap'] ?? props['mainAxisGap']) ?? 8,
-          crossAxisSpacing: _num(props['gap'] ?? props['crossAxisGap']) ?? 8,
+          crossAxisCount: p.i('crossAxisCount') ?? p.i('columns') ?? 2,
+          mainAxisSpacing: p.n('gap') ?? p.n('mainAxisGap') ?? 8,
+          crossAxisSpacing: p.n('gap') ?? p.n('crossAxisGap') ?? 8,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           children: children,
         );
         break;
       case 'divider':
-        result = Divider(color: _color(props['color']), thickness: _num(props['thickness']));
+        result = Divider(color: p.color('color'), thickness: p.n('thickness'));
         break;
       case 'circularprogressindicator':
-        result = Center(child: CircularProgressIndicator(value: _num(props['value'])));
+        result = Center(child: CircularProgressIndicator(value: p.n('value')));
         break;
       case 'linearprogressindicator':
-        result = LinearProgressIndicator(value: _num(props['value']));
+        result = LinearProgressIndicator(value: p.n('value'));
         break;
 
       // ---------- 交互 ----------
       case 'checkbox':
         result = BridgeCheckbox(
-          key: _nodeKey(props),
-          initial: props['value'] == true,
-          color: _color(props['color']),
-          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'] ?? props['onPressed'], v, fallback: props),
+          key: _nodeKey(p),
+          initial: p.b('value'),
+          color: p.color('color'),
+          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
         );
         break;
       case 'switch':
         result = BridgeSwitch(
-          key: _nodeKey(props),
-          initial: props['value'] == true,
-          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
+          key: _nodeKey(p),
+          initial: p.b('value'),
+          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
         );
         break;
       case 'slider':
         result = BridgeSlider(
-          key: _nodeKey(props),
-          initial: _num(props['value']) ?? 0,
-          min: _num(props['min']) ?? 0,
-          max: _num(props['max']) ?? 1,
-          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
+          key: _nodeKey(p),
+          initial: p.n('value') ?? 0,
+          min: p.n('min') ?? 0,
+          max: p.n('max') ?? 1,
+          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
         );
         break;
       case 'textfield' || 'edittext':
         result = BridgeTextField(
-          key: _nodeKey(props),
-          hint: props['hint'] ?? (props['decoration'] is Map ? (props['decoration'] as Map)['hintText']?.toString() : null),
-          label: props['label'] ?? (props['decoration'] is Map ? (props['decoration'] as Map)['labelText']?.toString() : null),
-          initial: props['text']?.toString(),
-          maxLines: _num(props['maxLines'])?.round(),
-          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
+          key: _nodeKey(p),
+          hint: p.s('hint') ?? _decText(p, 'hintText'),
+          label: p.s('label') ?? _decText(p, 'labelText'),
+          initial: p.s('text'),
+          maxLines: p.i('maxLines'),
+          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
         );
         break;
       case 'inkwell':
       case 'gesturedetector':
-        final onTap = _voidCallback(props['onTap'] ?? props['onPressed'] ?? props['onClick'], fallback: props);
-        result = type == 'inkwell' ? InkWell(onTap: onTap, child: child0()) : GestureDetector(onTap: onTap, child: child0());
+        final onTap = _voidCallback(p['onTap'], fallback: p.map);
+        result = p.type == 'inkwell' ? InkWell(onTap: onTap, child: child0()) : GestureDetector(onTap: onTap, child: child0());
         break;
       case 'dropdownbutton' || 'dropdownbuttonformfield':
-        final dd = BridgeDropdown(
-          key: _nodeKey(props),
-          initial: props['value']?.toString(),
-          items: _rawList(props['items']),
-          onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
-        );
-        result = type == 'dropdownbuttonformfield'
+        result = p.type == 'dropdownbuttonformfield'
             ? DropdownButtonFormField<String>(
-                initialValue: props['value']?.toString(),
-                items: _dropdownItems(props['items']),
-                onChanged: (v) => _emit(props['onChange'] ?? props['onChanged'], v, fallback: props),
-                decoration: InputDecoration(
-                  labelText: _decText(props, 'labelText'),
-                  border: const OutlineInputBorder(),
-                ),
+                initialValue: p.s('value'),
+                items: _dropdownItems(p['items']),
+                onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+                decoration: InputDecoration(labelText: _decText(p, 'labelText'), border: const OutlineInputBorder()),
               )
-            : dd;
+            : BridgeDropdown(
+                key: _nodeKey(p),
+                initial: p.s('value'),
+                items: p.list('items'),
+                onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+              );
         break;
 
       // ---------- Scaffold 体系 ----------
       case 'scaffold':
         result = Scaffold(
           key: scaffoldKey,
-          backgroundColor: _color(props['backgroundColor']),
-          appBar: _preferred(_build(props['appBar'])),
-          drawer: _build(props['drawer']),
-          endDrawer: _build(props['endDrawer']),
-          body: _build(props['body']) ?? child0(),
-          bottomNavigationBar: _build(props['bottomNavigationBar']),
-          floatingActionButton: _build(props['floatingActionButton']),
+          backgroundColor: p.color('backgroundColor'),
+          appBar: _preferred(_build(p['appBar'])),
+          drawer: _build(p['drawer']),
+          endDrawer: _build(p['endDrawer']),
+          body: _build(p['body']) ?? child0(),
+          bottomNavigationBar: _build(p['bottomNavigationBar']),
+          floatingActionButton: _build(p['floatingActionButton']),
         );
         break;
       case 'appbar':
-      case 'appbarpreferredsize':
         result = AppBar(
-          title: _build(props['title']),
-          leading: _build(props['leading']),
-          actions: _children(props['actions']),
-          elevation: _num(props['elevation']),
-          backgroundColor: _color(props['backgroundColor'] ?? props['color']),
-          foregroundColor: _color(props['foregroundColor']),
-          centerTitle: props['centerTitle'] == true,
-          automaticallyImplyLeading: props['automaticallyImplyLeading'] != false,
+          title: _build(p['title']),
+          leading: _build(p['leading']),
+          actions: _children(p['actions']),
+          elevation: p.n('elevation'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          foregroundColor: p.color('foregroundColor'),
+          centerTitle: p.b('centerTitle'),
+          automaticallyImplyLeading: p.b('automaticallyImplyLeading', true),
         );
         break;
       case 'drawer':
-        result = Drawer(
-          backgroundColor: _color(props['backgroundColor']),
-          child: child0(),
-        );
+        result = Drawer(backgroundColor: p.color('backgroundColor'), child: child0());
         break;
       case 'useraccountsdrawerheader':
         result = UserAccountsDrawerHeader(
-          decoration: _decoration(props),
-          accountName: _build(props['accountName']),
-          accountEmail: _build(props['accountEmail']),
-          currentAccountPicture: _build(props['currentAccountPicture']),
-          otherAccountsPictures: _children(props['otherAccountsPictures']),
+          decoration: _decoration(p),
+          accountName: _build(p['accountName']),
+          accountEmail: _build(p['accountEmail']),
+          currentAccountPicture: _build(p['currentAccountPicture']),
+          otherAccountsPictures: _children(p['otherAccountsPictures']),
         );
         break;
       case 'bottomnavigationbar':
         result = BridgeBottomNav(
-          key: _nodeKey(props),
-          items: _rawList(props['items']),
-          initialIndex: _num(props['currentIndex'])?.round() ?? 0,
-          selectedColor: _color(props['selectedItemColor']),
-          unselectedColor: _color(props['unselectedItemColor']),
-          type: props['type'] == 'shifting' ? BottomNavigationBarType.shifting : BottomNavigationBarType.fixed,
-          onTap: (i) => _emit(props['onTap'], i, fallback: props),
+          key: _nodeKey(p),
+          items: p.list('items'),
+          initialIndex: p.i('currentIndex') ?? 0,
+          selectedColor: p.color('selectedItemColor'),
+          unselectedColor: p.color('unselectedItemColor'),
+          type: p.s('type') == 'shifting' ? BottomNavigationBarType.shifting : BottomNavigationBarType.fixed,
+          onTap: (i) => _emit(p['onTap'], i, fallback: p.map),
         );
         break;
       case 'tab':
-        result = const SizedBox.shrink(); // 仅用于 TabBar 内部
+        result = const SizedBox.shrink();
         break;
       case 'tabbar':
         result = TabBar(
-          tabs: _rawList(props['tabs']).map((t) => Tab(text: (t is Map ? (t['text'] ?? t['label']) : t)?.toString())).toList(),
-          indicatorColor: _color(props['indicatorColor']),
-          labelColor: _color(props['labelColor']),
-          unselectedLabelColor: _color(props['unselectedLabelColor']),
+          tabs: p.list('tabs').map((t) {
+            final tp = Props.of(t);
+            return Tab(text: (tp['text'] ?? tp['label'])?.toString());
+          }).toList(),
+          indicatorColor: p.color('indicatorColor'),
+          labelColor: p.color('labelColor'),
+          unselectedLabelColor: p.color('unselectedLabelColor'),
         );
         break;
       case 'tabbarview':
         result = TabBarView(children: children);
         break;
       case 'defaulttabcontroller':
-        result = DefaultTabController(
-          length: _num(props['length'])?.round() ?? 1,
-          child: child0(),
+        result = DefaultTabController(length: p.i('length') ?? 1, child: child0());
+        break;
+
+      // ---------- 二维码 / 地图 / 图表 / 媒体 ----------
+      case 'qrcode' || 'qrimage' || 'qr':
+        result = QrImageView(
+          data: (p['data'] ?? p['text'] ?? '').toString(),
+          size: p.n('size'),
+          backgroundColor: p.color('background') ?? Colors.white,
+          eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.square, color: p.color('color') ?? Colors.black),
+          dataModuleStyle: QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: p.color('color') ?? Colors.black),
+        );
+        break;
+      case 'map' || 'fluttermap':
+        result = _mapView(p);
+        break;
+      case 'chart' || 'linechart' || 'barchart' || 'piechart':
+        result = _chart(p);
+        break;
+      case 'videoplayer' || 'video':
+        result = BridgeVideo(
+          url: (p['url'] ?? p['src'] ?? '').toString(),
+          autoPlay: p.b('autoPlay'),
+          loop: p.b('loop'),
+          showControls: p.b('controls', true),
+        );
+        break;
+      case 'audioplayer' || 'audio' || 'music':
+        result = BridgeAudio(
+          url: (p['url'] ?? p['src'] ?? '').toString(),
+          title: p.s('title') ?? p.s('text'),
+          autoPlay: p.b('autoPlay'),
         );
         break;
 
@@ -450,100 +483,176 @@ class Renderer {
       case 'androidview':
       case 'android':
         result = AndroidView(
-          viewType: (props['viewType'] ?? props['view'] ?? 'androlua/native').toString(),
+          viewType: (p['viewType'] ?? p['view'] ?? 'androlua/native').toString(),
           layoutDirection: TextDirection.ltr,
-          creationParams: _creationParams(props),
+          creationParams: _creationParams(p),
           creationParamsCodec: const StandardMessageCodec(),
         );
         break;
 
       default:
-        // 未识别类型：容错降级（有子节点当 Column，否则有文本当 Text，再无则忽略）
         if (children.isNotEmpty) {
           result = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
-        } else if (props['text'] != null) {
-          result = Text(props['text'].toString());
+        } else if (p['text'] != null) {
+          result = Text(p['text'].toString());
         } else {
           result = const SizedBox.shrink();
         }
     }
 
-    return _wrapCommon(result, props);
+    return _wrapCommon(result, p);
   }
 
   // ============================================================
-  // 通用属性 / 结构处理
+  // 列表：ListView.builder（懒加载）
   // ============================================================
 
-  /// 兼容两种节点写法：规范化后的（有 type）与 AndroLua 表风格（首元素是控件名，即 key "1"）。
-  static Map<String, dynamic> _props(Map raw) {
-    final props = <String, dynamic>{};
-    raw.forEach((k, v) => props[k.toString()] = v);
-    final extra = props['props'];
-    if (extra is Map) {
-      extra.forEach((k, v) => props[k.toString()] = v);
+  static Widget _listView(Props p, List<Widget> children) {
+    final padding = p.inset('padding');
+    final physics = Props.toPhysics(p['physics']);
+    final shrinkWrap = p.b('shrinkWrap');
+    final axis = p.axis('scrollDirection');
+
+    final count = p.i('itemCount');
+    final template = p['itemTemplate'] ?? p['item'];
+    if (template != null && count != null && count > 0) {
+      // 模板式懒加载：按需构建，字符串里的 $index 会替换成当前下标。
+      return ListView.builder(
+        padding: padding,
+        physics: physics,
+        shrinkWrap: shrinkWrap,
+        scrollDirection: axis,
+        itemCount: count,
+        itemBuilder: (ctx, i) => _build(_subst(template, i)) ?? const SizedBox.shrink(),
+      );
     }
+    return ListView.builder(
+      padding: padding,
+      physics: physics,
+      shrinkWrap: shrinkWrap,
+      scrollDirection: axis,
+      itemCount: children.length,
+      itemBuilder: (ctx, i) => children[i],
+    );
+  }
 
-    if (!props.containsKey('type') && !props.containsKey('t') && props.containsKey('1')) {
-      final type = props.remove('1');
-      final numeric = <int, dynamic>{};
-      for (final k in props.keys.toList()) {
-        final i = int.tryParse(k);
-        if (i != null && i >= 2) {
-          numeric[i] = props.remove(k);
-        }
-      }
-      props['type'] = _typeName(type);
-      if (numeric.isNotEmpty) {
-        final list = (numeric.keys.toList()..sort()).map((i) => numeric[i]).toList();
-        final existing = props['children'];
-        props['children'] = existing is List ? (<dynamic>[...list, ...existing]) : list;
-      }
+  /// 深拷贝并把字符串里的 `$index`/`$i` 替换为下标（用于模板式列表）。
+  static dynamic _subst(dynamic v, int i) {
+    if (v is String) return v.replaceAll(r'$index', '$i').replaceAll(r'$i', '$i');
+    if (v is List) return v.map((e) => _subst(e, i)).toList();
+    if (v is Map) {
+      final m = <String, dynamic>{};
+      v.forEach((k, val) => m[k.toString()] = _subst(val, i));
+      return m;
     }
-    return props;
+    return v;
   }
 
-  /// 控件名归一：中文/类名/带 View 后缀 → 控件名（去掉 class 前缀与包名）。
-  static String _typeName(dynamic v) {
-    if (v == null) return '';
-    var s = v.toString().trim();
-    if (s.startsWith('class ')) s = s.substring(6).trim();
-    final dot = s.lastIndexOf('.');
-    if (dot >= 0 && dot < s.length - 1) s = s.substring(dot + 1);
-    return s;
+  // ============================================================
+  // 地图 / 图表
+  // ============================================================
+
+  static Widget _mapView(Props p) {
+    final cp = Props.of(p['center']);
+    final lat = cp.n('lat') ?? cp.n('latitude') ?? 39.9042;
+    final lng = cp.n('lng') ?? cp.n('longitude') ?? 116.4074;
+    final markers = <Marker>[];
+    for (final m in p.list('markers')) {
+      final mp = Props.of(m);
+      markers.add(Marker(
+        point: LatLng(mp.n('lat') ?? 0, mp.n('lng') ?? 0),
+        width: 40,
+        height: 40,
+        child: Icon(Props.toIcon(mp['icon'] ?? 'location_on'), color: Colors.red, size: 32),
+      ));
+    }
+    final tile = p.s('tileUrl') ?? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    return FlutterMap(
+      options: MapOptions(
+        initialCenter: LatLng(lat, lng),
+        initialZoom: p.n('zoom') ?? 13,
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: tile,
+          userAgentPackageName: p.s('userAgent') ?? 'com.androlua',
+        ),
+        if (markers.isNotEmpty) MarkerLayer(markers: markers),
+      ],
+    );
   }
 
-  /// 把任意 widget 包成 PreferredSizeWidget（给 Scaffold.appBar 用，避免硬转型报错）。
-  static PreferredSizeWidget? _preferred(Widget? w) {
-    if (w == null) return null;
-    if (w is PreferredSizeWidget) return w;
-    return PreferredSize(preferredSize: const Size.fromHeight(kToolbarHeight), child: w);
+  static Widget _chart(Props p) {
+    final height = p.n('height') ?? 220;
+    final series = p.list('series').map(_Series.of).toList();
+    final kind = p.type == 'chart' ? (p.s('chartType') ?? 'line').toLowerCase() : p.type;
+
+    Widget body;
+    switch (kind) {
+      case 'bar' || 'barchart':
+        body = BarChart(BarChartData(
+          barGroups: [
+            for (var i = 0; i < series.length; i++)
+              BarChartGroupData(x: i, barRods: [
+                BarChartRodData(toY: series[i].value, color: series[i].color, width: 14, borderRadius: BorderRadius.circular(4)),
+              ]),
+          ],
+          gridData: const FlGridData(show: true),
+          borderData: FlBorderData(show: false),
+        ));
+        break;
+      case 'pie' || 'piechart':
+        body = PieChart(PieChartData(
+          sections: [
+            for (final s in series)
+              PieChartSectionData(value: s.value, title: s.name ?? '', color: s.color, radius: 80, titleStyle: const TextStyle(fontSize: 12, color: Colors.white)),
+          ],
+        ));
+        break;
+      default:
+        body = LineChart(LineChartData(
+          lineBarsData: [
+            for (final s in series)
+              LineChartBarData(
+                spots: s.spots,
+                color: s.color,
+                isCurved: true,
+                barWidth: 2,
+                dotData: const FlDotData(show: false),
+              ),
+          ],
+          gridData: const FlGridData(show: true),
+          borderData: FlBorderData(show: false),
+        ));
+    }
+    return SizedBox(height: height, child: body);
   }
 
-  /// weight / width / height 统一包裹。
-  static Widget _wrapCommon(Widget child, Map<String, dynamic> props) {
-    final weight = _num(props['weight']);
+  // ============================================================
+  // 通用结构/属性
+  // ============================================================
+
+  static Widget _wrapCommon(Widget child, Props p) {
+    final weight = p.n('weight');
     Widget out = child;
     if (weight != null) {
       out = Expanded(flex: weight.round(), child: out);
     }
-    final w = props['width'];
-    final h = props['height'];
+    final w = p['width'];
+    final h = p['height'];
     if (w != null || h != null) {
-      out = SizedBox(width: _dim(w), height: _dim(h), child: out);
+      out = SizedBox(width: Props.dim(w), height: Props.dim(h), child: out);
     }
     return out;
   }
 
-  static Key? _nodeKey(Map<String, dynamic> props) {
-    final id = props['id'] ?? props['key'];
+  static Key? _nodeKey(Props p) {
+    final id = p['id'] ?? p['key'];
     return id == null ? null : ValueKey(id.toString());
   }
 
   static List<Widget> _children(dynamic raw) {
-    if (raw is List) {
-      return raw.map((e) => _build(e)).whereType<Widget>().toList();
-    }
+    if (raw is List) return raw.map((e) => _build(e)).whereType<Widget>().toList();
     if (raw is Map) {
       final one = _build(raw);
       return one == null ? [] : [one];
@@ -551,17 +660,9 @@ class Renderer {
     return [];
   }
 
-  static List<dynamic> _rawList(dynamic raw) {
-    if (raw is List) return raw;
-    if (raw is Map) return [raw];
-    return [];
-  }
 
-  /// 若给的是 widget 描述就用它，否则用文字。
   static Widget _widgetOrText(dynamic spec, String fallback) {
-    if (spec is Map || spec is List) {
-      return _build(spec) ?? Text(fallback);
-    }
+    if (spec is Map || spec is List) return _build(spec) ?? Text(fallback);
     return Text(fallback);
   }
 
@@ -574,38 +675,46 @@ class Renderer {
   static Widget? _slotIcon(dynamic v) {
     if (v == null) return null;
     if (v is Map || v is List) return _build(v);
-    return Icon(_icon(v));
+    return Icon(Props.toIcon(v));
   }
 
-  static dynamic _creationParams(Map<String, dynamic> props) {
-    final p = props['params'];
-    if (p is Map) return p.cast<String, dynamic>();
+  static dynamic _creationParams(Props p) {
+    final params = p['params'];
+    if (params is Map) return params.cast<String, dynamic>();
     return <String, dynamic>{
-      'text': (props['text'] ?? '原生 AndroidView').toString(),
-      'background': props['background']?.toString(),
+      'text': (p['text'] ?? '原生 AndroidView').toString(),
+      'background': p['background']?.toString(),
     };
   }
 
-  static String? _decText(Map<String, dynamic> props, String key) {
-    final d = props['decoration'];
+  static String? _decText(Props p, String key) {
+    final d = p['decoration'];
     if (d is Map && d[key] != null) return d[key].toString();
-    return props[key]?.toString();
+    return p.s(key);
   }
 
-  // ---------- 回调 ----------
+  static PreferredSizeWidget? _preferred(Widget? w) {
+    if (w == null) return null;
+    if (w is PreferredSizeWidget) return w;
+    return PreferredSize(preferredSize: const Size.fromHeight(kToolbarHeight), child: w);
+  }
+
+  // ---------- 回調 ----------
 
   static VoidCallback? _voidCallback(dynamic onTap, {Map<String, dynamic>? fallback}) {
     if (onTap == null) return null;
     final action = onTap;
     return () {
       if (action is String) {
-        final res = FlutterBridge.instance.invoke(action, fallback);
+        dynamic res = FlutterBridge.instance.invoke(action, fallback);
+        if (res is Future) res = null;
         FlutterBridge.instance.emit('onTap', {'action': action, 'result': res});
       } else if (action is Map) {
         final m = action.cast<String, dynamic>();
         final method = (m['call'] ?? m['method'] ?? '').toString();
         final args = m['args'] is Map ? (m['args'] as Map).cast<String, dynamic>() : null;
-        final res = method.isEmpty ? null : FlutterBridge.instance.invoke(method, args);
+        dynamic res = method.isEmpty ? null : FlutterBridge.instance.invoke(method, args);
+        if (res is Future) res = null;
         final event = (m['event'] ?? m['emit'] ?? 'onTap').toString();
         FlutterBridge.instance.emit(event, {'action': method, 'args': args, 'result': res});
       }
@@ -619,20 +728,20 @@ class Renderer {
     if (method != null && method.isNotEmpty) {
       final a = spec is Map ? spec['args'] : null;
       res = FlutterBridge.instance.invoke(method, a is Map ? a.cast<String, dynamic>() : null);
+      if (res is Future) res = null;
     }
     FlutterBridge.instance.emit(name ?? 'onChange', {'value': value, 'result': res});
   }
 
-  // ---------- 装饰 ----------
+  // ---------- 装饰 / 样式 ----------
 
-  static BoxDecoration? _decoration(Map<String, dynamic> props) {
-    final dRaw = props['decoration'];
-    final d = dRaw is Map ? dRaw.cast<String, dynamic>() : <String, dynamic>{};
-    final color = _color(d['color'] ?? props['color'] ?? props['backgroundColor']);
-    final gradient = _gradient(d['gradient'] ?? props['gradient']);
-    final radius = _num(d['borderRadius'] ?? d['radius'] ?? props['radius']);
-    final border = _border(d, props);
-    final shadows = _shadows(d['boxShadow'] ?? props['boxShadow']);
+  static BoxDecoration? _decoration(Props p) {
+    final dp = Props.of(p['decoration']);
+    final color = dp.color('color') ?? p.color('color') ?? p.color('backgroundColor');
+    final gradient = Props.toGradient(dp['gradient'] ?? p['gradient']);
+    final radius = dp.n('radius') ?? dp.n('borderRadius') ?? p.n('radius');
+    final border = _decoBorder(dp, p);
+    final shadows = Props.toShadows(dp['boxShadow'] ?? dp['shadows'] ?? p['boxShadow']);
     if (color == null && gradient == null && radius == null && border == null && shadows == null) {
       return null;
     }
@@ -645,77 +754,36 @@ class Renderer {
     );
   }
 
-  static Gradient? _gradient(dynamic v) {
-    if (v is! Map) return null;
-    final m = v.cast<String, dynamic>();
-    final colors = (m['colors'] is List)
-        ? (m['colors'] as List).map((c) => _color(c)).whereType<Color>().toList()
-        : <Color>[];
-    if (colors.isEmpty) return null;
-    return LinearGradient(
-      colors: colors,
-      begin: _gradeAlign(m['begin']) ?? Alignment.topLeft,
-      end: _gradeAlign(m['end']) ?? Alignment.bottomRight,
-    );
-  }
-
-  static Alignment? _gradeAlign(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
-      case 'topleft': return Alignment.topLeft;
-      case 'topright': return Alignment.topRight;
-      case 'bottomleft': return Alignment.bottomLeft;
-      case 'bottomright': return Alignment.bottomRight;
-      case 'center': return Alignment.center;
-      case 'topcenter': return Alignment.topCenter;
-      case 'bottomcenter': return Alignment.bottomCenter;
-      default: return null;
+  static BoxBorder? _decoBorder(Props dp, Props p) {
+    BorderSide side(dynamic s) {
+      final sm = s is Map ? s.cast<String, dynamic>() : <String, dynamic>{};
+      return BorderSide(color: Props.toColor(sm['color']) ?? Colors.black26, width: Props.toNum(sm['width']) ?? 1);
     }
-  }
-
-  static BoxBorder? _border(Map<String, dynamic> d, Map<String, dynamic> props) {
-    BorderSide side(Map m) => BorderSide(
-          color: _color(m['color']) ?? Colors.black26,
-          width: _num(m['width']) ?? 1,
-        );
-    final all = d['border'] ?? props['border'];
-    if (all is Map) return Border.all(color: _color(all['color']) ?? Colors.black26, width: _num(all['width']) ?? 1);
-    final bb = d['borderBottom'] ?? props['borderBottom'];
-    final bt = d['borderTop'] ?? props['borderTop'];
+    final all = dp['border'] ?? dp['all'] ?? p['border'];
+    if (all is Map) {
+      final a = all.cast<String, dynamic>();
+      return Border.all(color: Props.toColor(a['color']) ?? Colors.black26, width: Props.toNum(a['width']) ?? 1);
+    }
+    final bb = dp['borderBottom'] ?? p['borderBottom'];
+    final bt = dp['borderTop'] ?? p['borderTop'];
     if (bb is Map || bt is Map) {
       return Border(
-        top: bt is Map ? side(bt.cast<String, dynamic>()) : BorderSide.none,
-        bottom: bb is Map ? side(bb.cast<String, dynamic>()) : BorderSide.none,
+        top: bt is Map ? side(bt) : BorderSide.none,
+        bottom: bb is Map ? side(bb) : BorderSide.none,
       );
     }
-    final bw = _num(props['borderWidth']);
-    if (bw != null) return Border.all(color: _color(props['borderColor']) ?? Colors.black26, width: bw);
+    final bw = p.n('borderWidth');
+    if (bw != null) return Border.all(color: p.color('borderColor') ?? Colors.black26, width: bw);
     return null;
   }
 
-  static List<BoxShadow>? _shadows(dynamic v) {
-    if (v is! List) return null;
-    final out = <BoxShadow>[];
-    for (final e in v) {
-      if (e is Map) {
-        final m = e.cast<String, dynamic>();
-        out.add(BoxShadow(
-          color: _color(m['color']) ?? const Color(0x33000000),
-          blurRadius: _num(m['blurRadius']) ?? 8,
-          offset: Offset(_num(m['dx']) ?? 0, _num(m['dy']) ?? 2),
-        ));
-      }
-    }
-    return out.isEmpty ? null : out;
-  }
-
-  static ButtonStyle? _buttonStyle(Map<String, dynamic> props) {
-    final sRaw = props['style'];
-    final s = sRaw is Map ? sRaw.cast<String, dynamic>() : <String, dynamic>{};
-    final bg = _color(s['backgroundColor'] ?? props['backgroundColor']);
-    final fg = _color(s['foregroundColor'] ?? props['foregroundColor']);
-    final pad = _insets(s['padding'] ?? props['padding']);
-    final el = _num(s['elevation'] ?? props['elevation']);
-    final radius = _num(s['radius'] ?? props['radius']);
+  static ButtonStyle? _buttonStyle(Props p) {
+    final sp = Props.of(p['style']);
+    final bg = sp.color('backgroundColor') ?? p.color('backgroundColor');
+    final fg = sp.color('foregroundColor') ?? p.color('foregroundColor');
+    final pad = sp.inset('padding') ?? p.inset('padding');
+    final el = sp.n('elevation') ?? p.n('elevation');
+    final radius = sp.n('radius') ?? p.n('radius');
     if (bg == null && fg == null && pad == null && el == null && radius == null) return null;
     return ButtonStyle(
       backgroundColor: bg != null ? WidgetStatePropertyAll<Color>(bg) : null,
@@ -729,201 +797,49 @@ class Renderer {
   }
 
   static List<DropdownMenuItem<String>> _dropdownItems(dynamic raw) {
-    return _rawList(raw).map((e) {
-      final m = e is Map ? e.cast<String, dynamic>() : <String, dynamic>{};
-      final value = (m['value'] ?? m['text'] ?? '').toString();
-      return DropdownMenuItem<String>(value: value, child: Text((m['text'] ?? m['value'] ?? '').toString()));
+    return Props.toList(raw).map((e) {
+      final ip = Props.of(e);
+      final value = (ip['value'] ?? ip['text'] ?? '').toString();
+      return DropdownMenuItem<String>(value: value, child: Text((ip['text'] ?? ip['value'] ?? '').toString()));
     }).toList();
   }
+}
 
-  static ScrollPhysics? _physics(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
-      case 'neverscrollable':
-      case 'never':
-        return const NeverScrollableScrollPhysics();
-      case 'bouncing':
-        return const BouncingScrollPhysics();
-      case 'clamping':
-        return const ClampingScrollPhysics();
-      default:
-        return null;
-    }
-  }
+/// 图表数据序列。
+class _Series {
+  _Series(this.name, this.color, this.value, this.spots);
 
-  // ---------- 基础类型转换 ----------
+  final String? name;
+  final Color color;
+  final double value;
+  final List<FlSpot> spots;
 
-  static EdgeInsets? _insets(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return EdgeInsets.all(v.toDouble());
-    if (v is List) {
-      final n = v.map((e) => (e as num).toDouble()).toList();
-      if (n.length == 1) return EdgeInsets.all(n[0]);
-      if (n.length == 2) return EdgeInsets.symmetric(vertical: n[0], horizontal: n[1]);
-      if (n.length == 4) return EdgeInsets.fromLTRB(n[0], n[1], n[2], n[3]);
-    }
-    if (v is Map) {
-      final m = v.cast<String, dynamic>();
-      return EdgeInsets.only(
-        left: _num(m['left']) ?? 0, top: _num(m['top']) ?? 0,
-        right: _num(m['right']) ?? 0, bottom: _num(m['bottom']) ?? 0,
-      );
-    }
-    return null;
-  }
-
-  static double? _dim(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return v.toDouble();
-    final s = v.toString().toLowerCase();
-    if (s == 'fill' || s == 'match' || s == 'match_parent') return double.infinity;
-    return double.tryParse(s);
-  }
-
-  static double? _num(dynamic v) {
-    if (v is num) return v.toDouble();
-    if (v is String) return double.tryParse(v);
-    return null;
-  }
-
-  static Axis _axis(dynamic v) => v?.toString().toLowerCase() == 'horizontal' ? Axis.horizontal : Axis.vertical;
-
-  static Color? _color(dynamic v) {
-    if (v == null) return null;
-    if (v is int) return Color(v);
-    if (v is! String) return null;
-    final named = {
-      'red': Colors.red, 'green': Colors.green, 'blue': Colors.blue, 'black': Colors.black,
-      'white': Colors.white, 'grey': Colors.grey, 'gray': Colors.grey, 'orange': Colors.orange,
-      'purple': Colors.purple, 'teal': Colors.teal, 'transparent': Colors.transparent,
-    };
-    final lower = v.toLowerCase();
-    if (named.containsKey(lower)) return named[lower];
-    var hex = lower.replaceFirst('#', '').replaceFirst('0x', '');
-    if (hex.length == 6) hex = 'ff$hex';
-    if (hex.length == 8) {
-      final value = int.tryParse(hex, radix: 16);
-      if (value != null) return Color(value);
-    }
-    return null;
-  }
-
-  static TextStyle _textStyle(Map<String, dynamic> props) {
-    final weight = props['fontWeight'];
-    FontWeight? fw;
-    if (weight is num) {
-      fw = FontWeight.values[(weight ~/ 100 - 1).clamp(0, 8)];
-    } else if (weight is String) {
-      switch (weight.toLowerCase()) {
-        case 'bold': fw = FontWeight.bold; break;
-        case 'normal': fw = FontWeight.normal; break;
-        default:
-          final n = int.tryParse(weight.replaceAll(RegExp(r'\D'), ''));
-          if (n != null) fw = FontWeight.values[(n ~/ 100 - 1).clamp(0, 8)];
+  static _Series of(dynamic raw) {
+    final p = Props.of(raw);
+    final points = p.list('points');
+    final spots = <FlSpot>[];
+    if (points.isNotEmpty) {
+      for (var i = 0; i < points.length; i++) {
+        final pt = points[i];
+        if (pt is Map) {
+          final pp = Props.of(pt);
+          spots.add(FlSpot(pp.n('x') ?? i.toDouble(), pp.n('y') ?? 0));
+        } else {
+          spots.add(FlSpot(i.toDouble(), Props.toNum(pt) ?? 0));
+        }
       }
-    } else if (weight == true) {
-      fw = FontWeight.bold;
     }
-    return TextStyle(
-      fontSize: _num(props['fontSize']),
-      color: _color(props['color'] ?? props['textColor']),
-      fontWeight: fw,
-      height: _num(props['lineHeight']),
+    return _Series(
+      p.s('name') ?? p.s('label'),
+      p.color('color') ?? Colors.blue,
+      p.n('value') ?? (spots.isNotEmpty ? spots.last.y : 1),
+      spots,
     );
-  }
-
-  static MainAxisAlignment _mainAxis(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
-      case 'center': return MainAxisAlignment.center;
-      case 'end': return MainAxisAlignment.end;
-      case 'spacebetween': case 'space_between': return MainAxisAlignment.spaceBetween;
-      case 'spacearound': return MainAxisAlignment.spaceAround;
-      case 'spaceevenly': return MainAxisAlignment.spaceEvenly;
-      default: return MainAxisAlignment.start;
-    }
-  }
-
-  static CrossAxisAlignment _crossAxis(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
-      case 'center': return CrossAxisAlignment.center;
-      case 'end': return CrossAxisAlignment.end;
-      case 'stretch': return CrossAxisAlignment.stretch;
-      case 'baseline': return CrossAxisAlignment.baseline;
-      default: return CrossAxisAlignment.start;
-    }
-  }
-
-  static MainAxisSize _size(dynamic v) =>
-      v?.toString().toLowerCase() == 'min' ? MainAxisSize.min : MainAxisSize.max;
-
-  static TextAlign _textAlign(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
-      case 'center': return TextAlign.center;
-      case 'right': case 'end': return TextAlign.right;
-      case 'justify': return TextAlign.justify;
-      default: return TextAlign.left;
-    }
-  }
-
-  static Alignment? _alignment(dynamic v) {
-    if (v == null) return null;
-    switch (v.toString().toLowerCase()) {
-      case 'center': return Alignment.center;
-      case 'topleft': return Alignment.topLeft;
-      case 'topright': return Alignment.topRight;
-      case 'bottomleft': return Alignment.bottomLeft;
-      case 'bottomright': return Alignment.bottomRight;
-      case 'topcenter': return Alignment.topCenter;
-      case 'bottomcenter': return Alignment.bottomCenter;
-      case 'centerleft': return Alignment.centerLeft;
-      case 'centerright': return Alignment.centerRight;
-      default: return null;
-    }
-  }
-
-  static WrapAlignment _wrapAlignment(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
-      case 'center': return WrapAlignment.center;
-      case 'end': case 'right': return WrapAlignment.end;
-      case 'spacebetween': return WrapAlignment.spaceBetween;
-      case 'spacearound': return WrapAlignment.spaceAround;
-      default: return WrapAlignment.start;
-    }
-  }
-
-  static const Map<String, IconData> _icons = {
-    'home': Icons.home, 'add': Icons.add, 'delete': Icons.delete, 'star': Icons.star,
-    'favorite': Icons.favorite, 'settings': Icons.settings, 'search': Icons.search,
-    'check': Icons.check, 'close': Icons.close, 'arrow_forward': Icons.arrow_forward,
-    'arrow_back': Icons.arrow_back, 'arrow_upward': Icons.arrow_upward,
-    'arrow_downward': Icons.arrow_downward, 'arrow_drop_up': Icons.arrow_drop_up,
-    'arrow_drop_down': Icons.arrow_drop_down, 'person': Icons.person, 'people': Icons.people,
-    'menu': Icons.menu, 'more_vert': Icons.more_vert, 'more_horiz': Icons.more_horiz,
-    'notifications': Icons.notifications, 'dashboard': Icons.dashboard, 'analytics': Icons.analytics,
-    'bar_chart': Icons.bar_chart, 'message': Icons.message, 'mail': Icons.mail,
-    'timer': Icons.timer, 'task_alt': Icons.task_alt, 'upload_file': Icons.upload_file,
-    'download': Icons.download, 'share': Icons.share, 'print': Icons.print,
-    'description': Icons.description, 'image': Icons.image, 'circle': Icons.circle,
-    'remove': Icons.remove, 'logout': Icons.logout, 'login': Icons.login,
-    'edit': Icons.edit, 'lock': Icons.lock, 'info': Icons.info, 'warning': Icons.warning,
-    'refresh': Icons.refresh, 'filter_list': Icons.filter_list, 'sort': Icons.sort,
-    'calendar_today': Icons.calendar_today, 'schedule': Icons.schedule, 'attach_money': Icons.attach_money,
-    'shopping_cart': Icons.shopping_cart, 'phone': Icons.phone, 'email': Icons.email,
-    'map': Icons.map, 'camera_alt': Icons.camera_alt, 'play_arrow': Icons.play_arrow,
-    'pause': Icons.pause, 'skip_next': Icons.skip_next, 'volume_up': Icons.volume_up,
-    'cloud': Icons.cloud, 'folder': Icons.folder, 'attach_file': Icons.attach_file,
-    'visibility': Icons.visibility, 'thumb_up': Icons.thumb_up, 'chat': Icons.chat,
-    'bookmark': Icons.bookmark, 'error': Icons.error, 'help': Icons.help,
-  };
-
-  static IconData _icon(dynamic name) {
-    final key = name?.toString().toLowerCase();
-    if (key == null) return Icons.widgets;
-    return _icons[key] ?? Icons.widgets;
   }
 }
 
 // ============================================================
-// 有状态交互控件（点击/拖动即时生效并带动效；整树重绘时保留状态）
+// 有状态交互控件
 // ============================================================
 
 class BridgeSwitch extends StatefulWidget {
@@ -1007,7 +923,6 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
       );
 }
 
-/// 底部导航栏（有状态：点击切换选中项）。
 class BridgeBottomNav extends StatefulWidget {
   const BridgeBottomNav({
     super.key,
@@ -1033,10 +948,10 @@ class _BridgeBottomNavState extends State<BridgeBottomNav> {
 
   List<BottomNavigationBarItem> _items() {
     return widget.items.map((e) {
-      final m = e is Map ? e.cast<String, dynamic>() : <String, dynamic>{};
+      final ip = Props.of(e);
       return BottomNavigationBarItem(
-        icon: Icon(Renderer._icon(m['icon'])),
-        label: (m['label'] ?? m['text'])?.toString(),
+        icon: Icon(Props.toIcon(ip['icon'])),
+        label: (ip['label'] ?? ip['text'])?.toString(),
       );
     }).toList();
   }
@@ -1048,16 +963,12 @@ class _BridgeBottomNavState extends State<BridgeBottomNav> {
       type: widget.type,
       selectedItemColor: widget.selectedColor,
       unselectedItemColor: widget.unselectedColor,
-      onTap: (i) {
-        setState(() => _index = i);
-        widget.onTap?.call(i);
-      },
+      onTap: (i) { setState(() => _index = i); widget.onTap?.call(i); },
       items: _items(),
     );
   }
 }
 
-/// 下拉选择（有状态：选择后更新并回调）。
 class BridgeDropdown extends StatefulWidget {
   const BridgeDropdown({super.key, this.initial, required this.items, required this.onChanged});
   final String? initial;
@@ -1069,13 +980,156 @@ class BridgeDropdown extends StatefulWidget {
 
 class _BridgeDropdownState extends State<BridgeDropdown> {
   late String? _value = widget.initial;
-
   @override
   Widget build(BuildContext context) {
     return DropdownButton<String>(
       value: _value,
       items: Renderer._dropdownItems(widget.items),
       onChanged: (v) { setState(() => _value = v); widget.onChanged(v); },
+    );
+  }
+}
+
+/// 视频播放器（网络/本地 URL）。
+class BridgeVideo extends StatefulWidget {
+  const BridgeVideo({super.key, required this.url, this.autoPlay = false, this.loop = false, this.showControls = true});
+  final String url;
+  final bool autoPlay;
+  final bool loop;
+  final bool showControls;
+  @override
+  State<BridgeVideo> createState() => _BridgeVideoState();
+}
+
+class _BridgeVideoState extends State<BridgeVideo> {
+  VideoPlayerController? _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      await c.initialize();
+      await c.setLooping(widget.loop);
+      if (widget.autoPlay) await c.play();
+      if (!mounted) { await c.dispose(); return; }
+      setState(() => _controller = c);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return Center(child: Text('视频加载失败: $_error', style: const TextStyle(color: Colors.red, fontSize: 12)));
+    }
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) {
+      return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()));
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c)),
+      if (widget.showControls)
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          IconButton(
+            icon: Icon(c.value.isPlaying ? Icons.pause : Icons.play_arrow),
+            onPressed: () => setState(() => c.value.isPlaying ? c.pause() : c.play()),
+          ),
+        ]),
+    ]);
+  }
+}
+
+/// 音频播放器（网络/本地 URL，含进度条）。
+class BridgeAudio extends StatefulWidget {
+  const BridgeAudio({super.key, required this.url, this.title, this.autoPlay = false});
+  final String url;
+  final String? title;
+  final bool autoPlay;
+  @override
+  State<BridgeAudio> createState() => _BridgeAudioState();
+}
+
+class _BridgeAudioState extends State<BridgeAudio> {
+  final AudioPlayer _player = AudioPlayer();
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  String? _error;
+  StreamSubscription<Duration>? _posSub;
+  StreamSubscription<PlayerState>? _stateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      await _player.setUrl(widget.url);
+      _duration = _player.duration ?? Duration.zero;
+      _posSub = _player.positionStream.listen((d) { if (mounted) setState(() => _position = d); });
+      _stateSub = _player.playerStateStream.listen((_) { if (mounted) setState(() {}); });
+      if (widget.autoPlay) await _player.play();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  void dispose() {
+    _posSub?.cancel();
+    _stateSub?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return ListTile(leading: const Icon(Icons.error, color: Colors.red), title: Text('音频加载失败: $_error', style: const TextStyle(fontSize: 12)));
+    }
+    final total = _duration.inMilliseconds;
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(children: [
+          IconButton(
+            icon: Icon(_player.playing ? Icons.pause : Icons.play_arrow),
+            onPressed: () => _player.playing ? _player.pause() : _player.play(),
+          ),
+          Expanded(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.title ?? '音频', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Slider(
+                value: total > 0 ? _position.inMilliseconds.clamp(0, total).toDouble() : 0,
+                max: total > 0 ? total.toDouble() : 1,
+                onChanged: (v) => _player.seek(Duration(milliseconds: v.round())),
+              ),
+              Text('${_fmt(_position)} / ${_fmt(_duration)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 }

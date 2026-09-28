@@ -341,7 +341,10 @@ public final class LuaJson {
                 "Scaffold", "AppBar", "Drawer", "UserAccountsDrawerHeader",
                 "BottomNavigationBar", "BottomNavigationBarItem", "TabBar", "Tab", "TabBarView",
                 "DefaultTabController", "SingleChildScrollView", "InkWell", "GestureDetector",
-                "Transform", "FractionallySizedBox", "DropdownButton", "DropdownButtonFormField"
+                "Transform", "FractionallySizedBox", "DropdownButton", "DropdownButtonFormField",
+                // 二维码 / 地图 / 图表 / 媒体
+                "QrCode", "QrImage", "FlutterMap", "Map", "Chart", "LineChart", "BarChart", "PieChart",
+                "VideoPlayer", "Video", "AudioPlayer", "Audio"
         };
         for (String n : names) {
             TYPES.put(n, n);

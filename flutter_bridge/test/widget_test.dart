@@ -1,8 +1,10 @@
 // Dart 逻辑层与渲染器的基本单元测试（不依赖平台通道）。
 import 'dart:convert';
 
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:flutter_bridge/src/bridge.dart';
 import 'package:flutter_bridge/src/renderer.dart';
@@ -97,5 +99,40 @@ void main() {
     expect(find.text('标题'), findsOneWidget);
     expect(find.text('第一行'), findsOneWidget);
     expect(find.text('第二行'), findsOneWidget);
+  });
+
+  testWidgets('ListView.builder 模板懒加载：只构建可见项', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'ListView',
+      'itemCount': 200,
+      'itemTemplate': {'1': 'Text', 'text': r'第 $index 项'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('第 0 项'), findsOneWidget);
+    expect(find.text('第 1 项'), findsOneWidget);
+    expect(find.text('第 100 项'), findsNothing); // 未构建
+  });
+
+  testWidgets('二维码控件 QrCode', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'QrCode',
+      'data': 'https://aicode.murk.top',
+      'size': 120,
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Center(child: w))));
+    expect(find.byType(QrImageView), findsOneWidget);
+  });
+
+  testWidgets('图表控件 Chart', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Chart',
+      'chartType': 'line',
+      'height': 200,
+      'series': [
+        {'name': 'A', 'color': '#3F51B5', 'points': [{'x': 0, 'y': 1}, {'x': 1, 'y': 3}]},
+      ],
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byType(LineChart), findsOneWidget);
   });
 }

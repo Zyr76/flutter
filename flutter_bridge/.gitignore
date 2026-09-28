@@ -50,3 +50,7 @@ app.*.symbols
 
 # Obfuscation related
 app.*.map.json
+
+# 插件构建产物
+.android/.kotlin/
+.android/plugins_build_output/

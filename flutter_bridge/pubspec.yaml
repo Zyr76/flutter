@@ -27,6 +27,12 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  qr_flutter: ^4.1.0
+  fl_chart: ^1.2.0
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+  video_player: ^2.14.0
+  just_audio: ^0.10.6
 
 dev_dependencies:
   flutter_test:
@@ -35,6 +41,11 @@ dev_dependencies:
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
+
+# path_provider_android 2.3.x 改用 jni（需 NDK/CMake），本容器 aarch64 无法构建；
+# 固定到纯 Java 实现的 2.2.17（与 memory 中的已验证做法一致）。
+dependency_overrides:
+  path_provider_android: 2.2.17
 
 flutter:
   # The following line ensures that the Material Icons font is

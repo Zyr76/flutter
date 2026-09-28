@@ -23,3 +23,7 @@ flutter_bridge/.android/.gradle/
 flutter_bridge/.android/.idea/
 flutter_bridge/.android/local.properties
 flutter_bridge/.android/**/build/
+
+# Flutter 模块插件构建产物
+flutter_bridge/.android/.kotlin/
+flutter_bridge/.android/plugins_build_output/
