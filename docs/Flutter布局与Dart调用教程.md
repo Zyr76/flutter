@@ -184,6 +184,23 @@ end
 
 > 若定义了 `onFlutterEvent`，则它优先；否则按事件名找**同名全局 Lua 函数**并调用（参数为 `data`）。
 
+### 5.3 AndroLua 式 id 句柄（h.onClick）
+
+给可点控件（Button/IconButton/ListTile/InkWell/GestureDetector 等）写 `id`，渲染时会生成一个**同名 Lua 句柄**（就像 loadlayout）：
+
+```lua
+local layout = { Column, { Button, text = "4664", id = "h" } }
+activity.setContentView(渲染Flutter(layout))
+
+function h.onClick()       -- 等价 h.onClick = function() ... end
+  print("哈哈哈")
+end
+```
+
+- 点击时若没有显式 `onClick`，控件会**按 id 发事件**（事件名 = id）；原生侧把该事件分发给句柄上注册的 `onClick`/`onChange`。
+- 开关/输入框等用 `h.onChange = function(data) ... end`（data.value 为当前值）。
+- 事件分发优先级：`onFlutterEvent` > 同名全局函数 > id 句柄上的 `onClick`/`onChange`。
+
 事件数据：
 
 - 点击按钮：`{ action = 方法名, args = 参数, result = Dart返回值 }`

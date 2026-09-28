@@ -179,4 +179,26 @@ void main() {
     final hello = events.firstWhere((e) => e['name'] == 'hello');
     expect((hello['data'] as Map)['action'], 'hello');
   });
+
+  testWidgets('id 句柄：带 id 的可点控件按 id 发 click 事件（供 h.onClick 风格）', (tester) async {
+    final events = <Map<String, dynamic>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      FlutterBridge.channel,
+      (MethodCall call) async {
+        if (call.method == 'nativeEvent') {
+          events.add((jsonDecode(call.arguments as String) as Map).cast<String, dynamic>());
+        }
+        return null;
+      },
+    );
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'ElevatedButton', 'id': 'h', 'child': {'1': 'Text', 'text': '4664'}},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    await tester.tap(find.byType(ElevatedButton));
+    await tester.pump();
+    final e = events.firstWhere((x) => x['name'] == 'h');
+    expect((e['data'] as Map)['type'], 'click');
+  });
 }

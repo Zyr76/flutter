@@ -9,8 +9,14 @@ import com.luajava.LuaException;
 import com.luajava.LuaObject;
 import com.luajava.LuaState;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONTokener;
+
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 
 /**
@@ -49,6 +55,7 @@ public final class FlutterLuaBridge {
         STATES.put(context, L);
 
         installWidgetFallback(L);
+        installNodeHandlers(L);
 
         // ---- flutterRender(spec [, container]) ----
         JavaFunction render = new JavaFunction(L) {
@@ -57,6 +64,7 @@ public final class FlutterLuaBridge {
                 FlutterLua flutter = flutter(context);
                 String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
                 flutter.render(json);
+                bindIds(L, json);
 
                 LuaObject container = getParam(3);
                 View view = flutter.getView();
@@ -175,6 +183,96 @@ public final class FlutterLuaBridge {
         }
     }
 
+    /**
+     * 定义 id 句柄机制：
+     * <pre>
+     * local layout = { Column, { Button, text="4664", id="h" } }
+     * activity.setContentView(渲染Flutter(layout))
+     * function h.onClick() print("哈哈哈") end   -- 等价 h.onClick = function() ... end
+     * </pre>
+     * `id` 会在渲染时生成一个 Lua 句柄（代理表），对它的 onClick/onChange 赋值会被存进 __flutter_handlers。
+     */
+    private static void installNodeHandlers(LuaState L) throws LuaException {
+        String chunk =
+                "__flutter_handlers = __flutter_handlers or {}\n"
+                        + "function __flutter_node(id)\n"
+                        + "  return setmetatable({ __id = id }, {\n"
+                        + "    __index = function(t, k) local h = __flutter_handlers[id]; return h and h[k] end,\n"
+                        + "    __newindex = function(t, k, v)\n"
+                        + "      local h = __flutter_handlers[id]\n"
+                        + "      if not h then h = {}; __flutter_handlers[id] = h end\n"
+                        + "      h[k] = v\n"
+                        + "    end\n"
+                        + "  })\n"
+                        + "end";
+        int ok = L.LdoString(chunk);
+        if (ok != 0) {
+            throw new LuaException("安装 id 句柄机制失败: " + L.toString(-1));
+        }
+    }
+
+    /** 扫描 spec 里所有 id，并为每个 id 建立/刷新一个 Lua 句柄全局变量（与 loadlayout 一致语义）。 */
+    private static void bindIds(LuaState L, String json) {
+        try {
+            Object root = new JSONTokener(json).nextValue();
+            Set<String> ids = new LinkedHashSet<String>();
+            collectIds(root, ids);
+            for (String id : ids) {
+                L.getGlobal("__flutter_node");
+                L.pushString(id);
+                if (L.pcall(1, 1, 0) == 0) {
+                    L.setGlobal(id);
+                } else {
+                    L.pop(1);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void collectIds(Object v, Set<String> out) {
+        if (v instanceof JSONObject) {
+            JSONObject o = (JSONObject) v;
+            Object id = o.opt("id");
+            if (id instanceof String && !((String) id).isEmpty()) {
+                out.add((String) id);
+            }
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                collectIds(o.opt(it.next()), out);
+            }
+        } else if (v instanceof JSONArray) {
+            JSONArray a = (JSONArray) v;
+            for (int i = 0; i < a.length(); i++) {
+                collectIds(a.opt(i), out);
+            }
+        }
+    }
+
+    /** 把事件分发给对应 id 句柄上注册的回调（onClick / onChange）。 */
+    private static void dispatchNodeHandler(LuaState L, String id, JSONObject event) throws LuaException {
+        LuaObject handlers = L.getLuaObject("__flutter_handlers");
+        if (handlers == null || !handlers.isTable()) {
+            return;
+        }
+        LuaObject entry = handlers.getField(id);
+        if (entry == null || !entry.isTable()) {
+            return;
+        }
+        String type = event.optString("type", "");
+        String[] keys = "change".equals(type)
+                ? new String[]{"onChange", "onChanged"}
+                : new String[]{"onClick", "onTap", "click"};
+        for (String k : keys) {
+            LuaObject fn = entry.getField(k);
+            if (fn != null && fn.isFunction()) {
+                fn.push();
+                LuaJson.pushJava(L, event.opt("data"));
+                L.pcall(1, 0, 0);
+                return;
+            }
+        }
+    }
+
     private static void reg(JavaFunction f, String... names) throws LuaException {
         for (String n : names) {
             f.register(n);
@@ -213,7 +311,10 @@ public final class FlutterLuaBridge {
                             fn.push();
                             LuaJson.pushJava(L, o.opt("data"));
                             L.pcall(1, 0, 0);
+                            return;
                         }
+                        // id 句柄回调：h.onClick = fn / h.onChange = fn（由 __flutter_handlers 保存）
+                        dispatchNodeHandler(L, name, o);
                     } catch (Exception ignored) {
                     }
                 }

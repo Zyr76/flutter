@@ -234,7 +234,7 @@ class Renderer {
       // ---------- 按钮 ----------
       case 'button' || 'elevatedbutton' || 'textbutton' || 'filledbutton' || 'outlinedbutton':
         final label = (p['text'] ?? p['label'] ?? 'Button').toString();
-        final onTap = _voidCallback(p['onTap'], fallback: p.map);
+        final onTap = _tapHandler(p);
         final style = _buttonStyle(p);
         final child = _widgetOrText(p['child'], label);
         result = Padding(
@@ -251,12 +251,12 @@ class Renderer {
       case 'iconbutton':
         result = IconButton(
           icon: Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color')),
-          onPressed: _voidCallback(p['onTap'], fallback: p.map),
+          onPressed: _tapHandler(p),
         );
         break;
       case 'floatingactionbutton':
         result = FloatingActionButton(
-          onPressed: _voidCallback(p['onTap'], fallback: p.map),
+          onPressed: _tapHandler(p),
           backgroundColor: p.color('color') ?? p.color('backgroundColor'),
           child: Icon(Props.toIcon(p['icon'] ?? p['name'])),
         );
@@ -294,7 +294,7 @@ class Renderer {
           title: _slotText(p['title'] ?? p['text']),
           subtitle: _slotText(p['subtitle']),
           trailing: _slotText(p['trailing']),
-          onTap: _voidCallback(p['onTap'], fallback: p.map),
+          onTap: _tapHandler(p),
         );
         break;
 
@@ -328,14 +328,14 @@ class Renderer {
           key: _nodeKey(p),
           initial: p.b('value'),
           color: p.color('color'),
-          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+          onChanged: (v) => _change(p, v),
         );
         break;
       case 'switch':
         result = BridgeSwitch(
           key: _nodeKey(p),
           initial: p.b('value'),
-          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+          onChanged: (v) => _change(p, v),
         );
         break;
       case 'slider':
@@ -344,7 +344,7 @@ class Renderer {
           initial: p.n('value') ?? 0,
           min: p.n('min') ?? 0,
           max: p.n('max') ?? 1,
-          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+          onChanged: (v) => _change(p, v),
         );
         break;
       case 'textfield' || 'edittext':
@@ -354,12 +354,12 @@ class Renderer {
           label: p.s('label') ?? _decText(p, 'labelText'),
           initial: p.s('text'),
           maxLines: p.i('maxLines'),
-          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+          onChanged: (v) => _change(p, v),
         );
         break;
       case 'inkwell':
       case 'gesturedetector':
-        final onTap = _voidCallback(p['onTap'], fallback: p.map);
+        final onTap = _tapHandler(p);
         result = p.type == 'inkwell' ? InkWell(onTap: onTap, child: child0()) : GestureDetector(onTap: onTap, child: child0());
         break;
       case 'dropdownbutton' || 'dropdownbuttonformfield':
@@ -700,6 +700,31 @@ class Renderer {
   }
 
   // ---------- 回調 ----------
+
+  /// 点击处理：优先显式 onTap；否则若有 id，则按 id 发事件（供 Lua 侧 h.onClick 风格）。
+  static VoidCallback? _tapHandler(Props p) {
+    final t = p['onTap'];
+    if (t != null) return _voidCallback(t, fallback: p.map);
+    final id = p['id'];
+    if (id != null) {
+      final sid = id.toString();
+      return () => FlutterBridge.instance.emit(sid, {'id': sid, 'type': 'click'});
+    }
+    return null;
+  }
+
+  /// 变化处理：优先显式 onChange；否则若有 id，则按 id 发 change 事件。
+  static void _change(Props p, dynamic value) {
+    final c = p['onChange'];
+    if (c != null) {
+      _emit(c, value, fallback: p.map);
+      return;
+    }
+    final id = p['id'];
+    if (id != null) {
+      FlutterBridge.instance.emit(id.toString(), {'id': id.toString(), 'type': 'change', 'value': value});
+    }
+  }
 
   static VoidCallback? _voidCallback(dynamic onTap, {Map<String, dynamic>? fallback}) {
     if (onTap == null) return null;
