@@ -64,4 +64,38 @@ void main() {
     expect(find.text('内容'), findsOneWidget);
     expect(find.text('首页'), findsOneWidget);
   });
+
+  testWidgets('AndroLua 风格嵌套插槽：appBar/body 用首元素控件名', (tester) async {
+    // 模拟 Java 只规范化了顶层、嵌套槽仍是 { "1": "Widget", ... } 的情况
+    final w = Renderer.build(jsonEncode({
+      '1': 'Scaffold',
+      'appBar': {
+        '1': 'AppBar',
+        'title': {'1': 'Text', 'text': '标题'},
+        'actions': [
+          {'1': 'IconButton', 'icon': 'search'},
+        ],
+      },
+      'body': {
+        '1': 'SingleChildScrollView',
+        'child': {
+          '1': 'Column',
+          'gap': 8,
+          '2': {'1': 'Text', 'text': '第一行'},
+          '3': {'1': 'Text', 'text': '第二行'},
+        },
+      },
+      'bottomNavigationBar': {
+        '1': 'BottomNavigationBar',
+        'items': [
+          {'1': 'BottomNavigationBarItem', 'icon': 'home', 'label': '首页'},
+          {'1': 'BottomNavigationBarItem', 'icon': 'person', 'label': '我的'},
+        ],
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: w));
+    expect(find.text('标题'), findsOneWidget);
+    expect(find.text('第一行'), findsOneWidget);
+    expect(find.text('第二行'), findsOneWidget);
+  });
 }

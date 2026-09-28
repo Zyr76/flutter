@@ -58,6 +58,11 @@ class Renderer {
     if (spec == null) return null;
     if (spec is String) return Text(spec);
     if (spec is num || spec is bool) return Text('$spec');
+    if (spec is List) {
+      // 数组式：{ Widget, ...子节点 }
+      if (spec.isEmpty) return null;
+      return _buildInner(<String, dynamic>{'type': _typeName(spec.first), 'children': spec.sublist(1)});
+    }
     if (spec is! Map) return const SizedBox.shrink();
 
     final props = _props(spec);
@@ -373,7 +378,7 @@ class Renderer {
         result = Scaffold(
           key: scaffoldKey,
           backgroundColor: _color(props['backgroundColor']),
-          appBar: _build(props['appBar']) as PreferredSizeWidget?,
+          appBar: _preferred(_build(props['appBar'])),
           drawer: _build(props['drawer']),
           endDrawer: _build(props['endDrawer']),
           body: _build(props['body']) ?? child0(),
@@ -470,6 +475,7 @@ class Renderer {
   // 通用属性 / 结构处理
   // ============================================================
 
+  /// 兼容两种节点写法：规范化后的（有 type）与 AndroLua 表风格（首元素是控件名，即 key "1"）。
   static Map<String, dynamic> _props(Map raw) {
     final props = <String, dynamic>{};
     raw.forEach((k, v) => props[k.toString()] = v);
@@ -477,7 +483,41 @@ class Renderer {
     if (extra is Map) {
       extra.forEach((k, v) => props[k.toString()] = v);
     }
+
+    if (!props.containsKey('type') && !props.containsKey('t') && props.containsKey('1')) {
+      final type = props.remove('1');
+      final numeric = <int, dynamic>{};
+      for (final k in props.keys.toList()) {
+        final i = int.tryParse(k);
+        if (i != null && i >= 2) {
+          numeric[i] = props.remove(k);
+        }
+      }
+      props['type'] = _typeName(type);
+      if (numeric.isNotEmpty) {
+        final list = (numeric.keys.toList()..sort()).map((i) => numeric[i]).toList();
+        final existing = props['children'];
+        props['children'] = existing is List ? (<dynamic>[...list, ...existing]) : list;
+      }
+    }
     return props;
+  }
+
+  /// 控件名归一：中文/类名/带 View 后缀 → 控件名（去掉 class 前缀与包名）。
+  static String _typeName(dynamic v) {
+    if (v == null) return '';
+    var s = v.toString().trim();
+    if (s.startsWith('class ')) s = s.substring(6).trim();
+    final dot = s.lastIndexOf('.');
+    if (dot >= 0 && dot < s.length - 1) s = s.substring(dot + 1);
+    return s;
+  }
+
+  /// 把任意 widget 包成 PreferredSizeWidget（给 Scaffold.appBar 用，避免硬转型报错）。
+  static PreferredSizeWidget? _preferred(Widget? w) {
+    if (w == null) return null;
+    if (w is PreferredSizeWidget) return w;
+    return PreferredSize(preferredSize: const Size.fromHeight(kToolbarHeight), child: w);
   }
 
   /// weight / width / height 统一包裹。
