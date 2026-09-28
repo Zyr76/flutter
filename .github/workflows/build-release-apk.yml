@@ -1,0 +1,70 @@
+name: Build Release APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ androlua ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+
+      - name: Install CMake 4.1.2 into Android SDK
+        # 项目的 CMakeLists 要求 >= 4.1.2，而 sdkmanager 只提供到 3.31.x，故手动放入 SDK
+        run: |
+          set -euo pipefail
+          CM="$ANDROID_HOME/cmake/4.1.2"
+          mkdir -p "$CM"
+          curl -fsSL -o /tmp/cmake.tar.gz \
+            https://github.com/Kitware/CMake/releases/download/v4.1.2/cmake-4.1.2-linux-x86_64.tar.gz
+          tar -xzf /tmp/cmake.tar.gz -C "$CM" --strip-components=1
+          "$CM/bin/cmake" --version
+
+      - name: Ensure debug keystore
+        run: |
+          KS="$HOME/.android/debug.keystore"
+          if [ ! -f "$KS" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v -keystore "$KS" -storepass android -alias androiddebugkey \
+              -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Flutter pub get
+        working-directory: flutter_bridge
+        run: flutter pub get
+
+      - name: Build Flutter AAR (release / AOT)
+        working-directory: flutter_bridge
+        run: flutter build aar --release --no-debug --no-profile --target-platform android-arm64
+
+      - name: Build AndroLua release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: androlua-flutter-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn

@@ -1,0 +1,25 @@
+# ---- Android / Gradle 构建产物 ----
+.gradle/
+build/
+app/build/
+app/.cxx/
+captures/
+local.properties
+
+# ---- IDE / 编辑器 ----
+.idea/
+*.iml
+.acside/
+.choccy/
+
+# ---- Flutter 模块构建产物（AAR 由 CI 现产，不入库）----
+flutter_bridge/.dart_tool/
+flutter_bridge/build/
+flutter_bridge/.flutter-plugins
+flutter_bridge/.flutter-plugins-dependencies
+flutter_bridge/.idea/
+flutter_bridge/.ios/
+flutter_bridge/.android/.gradle/
+flutter_bridge/.android/.idea/
+flutter_bridge/.android/local.properties
+flutter_bridge/.android/**/build/
