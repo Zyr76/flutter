@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -565,6 +566,43 @@ void main() {
     }));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
     expect(find.byType(Expanded), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('新增控件：Cupertino / NavigationDrawer / MaterialBanner / SearchBar / ListWheel', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'SingleChildScrollView',
+      'child': {
+        '1': 'Column',
+        'gap': 8,
+        'children': [
+          {'1': 'CupertinoButton', 'text': 'cb'},
+          {'1': 'CupertinoSwitch', 'value': true},
+          {'1': 'CupertinoSlider', 'min': 0, 'max': 10, 'value': 5},
+          {'1': 'CupertinoNavigationBar', 'title': 'nav'},
+          {'1': 'MaterialBanner', 'children': [{'1': 'Text', 'text': 'banner'}]},
+          {'1': 'SearchBar', 'hint': 'search'},
+          {'1': 'SizedBox', 'height': 200, 'child': {
+            '1': 'CupertinoDatePicker',
+            'mode': 'date',
+          }},
+          {'1': 'SizedBox', 'height': 160, 'child': {
+            '1': 'ListWheelScrollView',
+            'itemExtent': 40,
+            'children': [
+              {'1': 'Text', 'text': 'wheel'},
+            ],
+          }},
+        ],
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byType(CupertinoButton), findsOneWidget);
+    expect(find.byType(CupertinoSwitch), findsOneWidget);
+    expect(find.byType(CupertinoSlider), findsOneWidget);
+    expect(find.byType(MaterialBanner), findsOneWidget);
+    expect(find.byType(SearchBar), findsOneWidget);
+    expect(find.byType(ListWheelScrollView), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 }

@@ -600,6 +600,9 @@ class Props {
       decorationColor: p.color('decorationColor'),
       decorationStyle: _decorationStyle(p['decorationStyle']),
       fontFamily: p.s('fontFamily'),
+      fontFamilyFallback: toList(p['fontFamilyFallback']).isEmpty
+          ? null
+          : toList(p['fontFamilyFallback']).map((e) => e.toString()).toList(),
       shadows: toShadows(p['shadow'] ?? p['shadows']),
       backgroundColor: p.color('textBackgroundColor'),
       wordSpacing: p.n('wordSpacing'),
@@ -617,6 +620,14 @@ class Props {
       case 'solid': return TextDecorationStyle.solid;
       default: return null;
     }
+  }
+
+  /// 语言/地区：'zh' / 'zh-CN' / 'zh_CN' -> Locale。
+  static Locale? toLocale(dynamic v) {
+    final s = v?.toString();
+    if (s == null || s.isEmpty) return null;
+    final parts = s.split(RegExp(r'[-_]'));
+    return parts.length > 1 ? Locale(parts[0], parts[1]) : Locale(parts[0]);
   }
 
   /// 日期解析：支持 ISO 字符串 / 毫秒时间戳 / DateTime。

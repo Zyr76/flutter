@@ -302,6 +302,7 @@ class Renderer {
               : null,
           maxLines: p.i('maxLines'),
           semanticsLabel: p.s('semanticsLabel'),
+          locale: p.has('locale') ? Props.toLocale(p['locale']) : null,
           textWidthBasis: p.has('textWidthBasis') ? Props.toTextWidthBasis(p['textWidthBasis']) : null,
           selectionColor: p.color('selectionColor'),
         );
@@ -1377,6 +1378,112 @@ class Renderer {
           enableDrag: p.b('enableDrag', true),
           showDragHandle: p.b('showDragHandle'),
           builder: (ctx) => child0(),
+        );
+        break;
+
+      // ============================================================
+      // Cupertino / 其它补充
+      // ============================================================
+      case 'cupertinobutton':
+        result = CupertinoButton(
+          color: p.color('color'),
+          disabledColor: p.color('disabledColor') ?? CupertinoColors.quaternarySystemFill,
+          padding: p.inset('padding'),
+          borderRadius: Props.toBorderRadius(p['borderRadius'] ?? p['radius']),
+          minimumSize: _size(p['minimumSize']) ?? (p.n('minSize') != null ? Size.square(p.n('minSize')!) : null),
+          pressedOpacity: p.n('pressedOpacity') ?? 0.1,
+          alignment: p.align('alignment') ?? Alignment.center,
+          onPressed: p.b('enabled', true) ? _tapHandler(p) : null,
+          child: _widgetOrText(p['child'], (p['text'] ?? 'Button').toString(), '$path/child'),
+        );
+        break;
+      case 'cupertinoswitch':
+        result = BridgeCupertinoSwitch(key: _nodeKey(p, path), p: p, onChanged: (v) => _change(p, v));
+        break;
+      case 'cupertinoslider':
+        result = BridgeCupertinoSlider(key: _nodeKey(p, path), p: p, onChanged: (v) => _change(p, v));
+        break;
+      case 'cupertinoalertdialog':
+        result = CupertinoAlertDialog(
+          title: _build(p['title'], '$path/title'),
+          content: _build(p['content'], '$path/content'),
+          actions: _children(p['actions'], '$path/actions'),
+        );
+        break;
+      case 'cupertinodatepicker':
+        result = BridgeCupertinoDatePicker(
+          key: _nodeKey(p, path),
+          p: p,
+          onChanged: (d) => _emit(p['onChange'], d.toIso8601String(), fallback: p.map),
+        );
+        break;
+      case 'cupertinotimerpicker':
+        result = CupertinoTimerPicker(
+          mode: p.s('mode')?.toLowerCase() == 'hms' ? CupertinoTimerPickerMode.hms : CupertinoTimerPickerMode.hm,
+          initialTimerDuration: Duration(seconds: p.i('initialSeconds') ?? 0),
+          alignment: p.align('alignment') ?? Alignment.center,
+          onTimerDurationChanged: (d) => _emit(p['onChange'], d.inSeconds, fallback: p.map),
+        );
+        break;
+      case 'cupertinonavigationbar':
+        result = CupertinoNavigationBar(
+          middle: _slotText(p['title'] ?? p['middle'], '$path/middle'),
+          leading: _slotIcon(p['leading'], '$path/leading'),
+          trailing: _slotIcon(p['trailing'], '$path/trailing'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          border: p['border'] != null && _borderSide(p['border']) != null
+              ? Border(bottom: _borderSide(p['border'])!)
+              : null,
+        );
+        break;
+      case 'navigationdrawer':
+        result = NavigationDrawer(
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          surfaceTintColor: p.color('surfaceTintColor'),
+          selectedIndex: p.i('selectedIndex') ?? p.i('currentIndex'),
+          onDestinationSelected: (i) => _emit(p['onTap'] ?? p['onChange'], i, fallback: p.map),
+          children: children,
+        );
+        break;
+      case 'materialbanner':
+        final bannerActions = _children(p['actions'], '$path/actions');
+        result = MaterialBanner(
+          content: child0(),
+          leading: _build(p['leading'], '$path/leading'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          // MaterialBanner 要求 actions 非空
+          actions: bannerActions.isEmpty
+              ? [TextButton(onPressed: _tapHandler(p), child: const Text('OK'))]
+              : bannerActions,
+        );
+        break;
+      case 'searchbar':
+        final trailing = _children(p['trailing'], '$path/trailing');
+        result = SearchBar(
+          hintText: p.s('hint') ?? p.s('hintText'),
+          leading: p['leading'] != null ? Icon(Props.toIcon(p['leading'])) : null,
+          trailing: trailing.isEmpty ? null : trailing,
+          backgroundColor: p.color('backgroundColor') == null
+              ? null
+              : WidgetStatePropertyAll<Color?>(p.color('backgroundColor')),
+          elevation: p.n('elevation') == null ? null : WidgetStatePropertyAll<double?>(p.n('elevation')),
+          onChanged: (v) => _change(p, v),
+          onSubmitted: (v) => _emit(p['onSubmitted'], v, fallback: p.map),
+        );
+        break;
+      case 'listwheelscrollview':
+        result = ListWheelScrollView(
+          itemExtent: p.n('itemExtent') ?? 40,
+          diameterRatio: p.n('diameterRatio') ?? 2,
+          perspective: p.n('perspective') ?? 0.003,
+          offAxisFraction: p.n('offAxisFraction') ?? 0,
+          useMagnifier: p.b('useMagnifier'),
+          magnification: p.n('magnification') ?? 1,
+          squeeze: p.n('squeeze') ?? 1,
+          physics: Props.toPhysics(p['physics']),
+          children: children,
         );
         break;
 
@@ -2865,6 +2972,117 @@ class _BridgePageViewState extends State<BridgePageView> {
       physics: Props.toPhysics(p['physics']),
       onPageChanged: (i) => widget.onChanged?.call(i),
       children: widget.children,
+    );
+  }
+}
+
+class BridgeCupertinoSwitch extends StatefulWidget {
+  const BridgeCupertinoSwitch({super.key, required this.p, required this.onChanged});
+  final Props p;
+  final ValueChanged<bool> onChanged;
+  @override
+  State<BridgeCupertinoSwitch> createState() => _BridgeCupertinoSwitchState();
+}
+
+class _BridgeCupertinoSwitchState extends State<BridgeCupertinoSwitch> {
+  late bool _value = widget.p.b('value');
+  @override
+  void didUpdateWidget(BridgeCupertinoSwitch old) {
+    super.didUpdateWidget(old);
+    final next = widget.p.b('value');
+    if (next != old.p.b('value')) setState(() => _value = next);
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    return CupertinoSwitch(
+      value: _value,
+      activeTrackColor: p.color('activeTrackColor'),
+      inactiveTrackColor: p.color('inactiveTrackColor') ?? p.color('trackColor'),
+      thumbColor: p.color('thumbColor'),
+      applyTheme: p.b('applyTheme'),
+      onChanged: p.b('enabled', true)
+          ? (v) { setState(() => _value = v); widget.onChanged(v); }
+          : null,
+    );
+  }
+}
+
+class BridgeCupertinoSlider extends StatefulWidget {
+  const BridgeCupertinoSlider({super.key, required this.p, required this.onChanged});
+  final Props p;
+  final ValueChanged<double> onChanged;
+  @override
+  State<BridgeCupertinoSlider> createState() => _BridgeCupertinoSliderState();
+}
+
+class _BridgeCupertinoSliderState extends State<BridgeCupertinoSlider> {
+  late double _value = widget.p.n('value') ?? 0;
+  @override
+  void didUpdateWidget(BridgeCupertinoSlider old) {
+    super.didUpdateWidget(old);
+    final next = widget.p.n('value');
+    if (next != null && next != old.p.n('value')) setState(() => _value = next);
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    final min = p.n('min') ?? 0;
+    final maxRaw = p.n('max') ?? 1;
+    final max = maxRaw <= min ? min + 1 : maxRaw;
+    return CupertinoSlider(
+      value: _value.clamp(min, max),
+      min: min,
+      max: max,
+      divisions: p.i('divisions'),
+      activeColor: p.color('activeColor'),
+      thumbColor: p.color('thumbColor') ?? CupertinoColors.white,
+      onChanged: p.b('enabled', true)
+          ? (v) { setState(() => _value = v); widget.onChanged(v); }
+          : null,
+    );
+  }
+}
+
+class BridgeCupertinoDatePicker extends StatefulWidget {
+  const BridgeCupertinoDatePicker({super.key, required this.p, this.onChanged});
+  final Props p;
+  final ValueChanged<DateTime>? onChanged;
+  @override
+  State<BridgeCupertinoDatePicker> createState() => _BridgeCupertinoDatePickerState();
+}
+
+class _BridgeCupertinoDatePickerState extends State<BridgeCupertinoDatePicker> {
+  DateTime get _min => Props.toDate(widget.p['minimumDate']) ?? DateTime(2000);
+  DateTime get _max => Props.toDate(widget.p['maximumDate']) ?? DateTime(2100);
+  late DateTime _value = _initValue();
+
+  DateTime _initValue() {
+    final v = Props.toDate(widget.p['value'] ?? widget.p['initialDateTime']) ?? DateTime.now();
+    final min = _min;
+    final max = _max;
+    if (v.isBefore(min)) return min;
+    if (v.isAfter(max)) return max;
+    return v;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    final mode = p.s('mode')?.toLowerCase();
+    return CupertinoDatePicker(
+      mode: mode == 'time'
+          ? CupertinoDatePickerMode.time
+          : (mode == 'dateandtime' ? CupertinoDatePickerMode.dateAndTime : CupertinoDatePickerMode.date),
+      initialDateTime: _value,
+      minimumDate: _min,
+      maximumDate: _max,
+      minuteInterval: p.i('minuteInterval') ?? 1,
+      use24hFormat: p.b('use24hFormat', true),
+      onDateTimeChanged: (d) {
+        _value = d;
+        widget.onChanged?.call(d);
+      },
     );
   }
 }

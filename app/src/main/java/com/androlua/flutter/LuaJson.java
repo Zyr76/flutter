@@ -369,7 +369,11 @@ public final class LuaJson {
                 "AlertDialog", "SimpleDialog", "Dialog", "BottomSheet", "SnackBar", "TextFormField",
                 "PageView", "NavigationRail", "DropdownMenu", "ReorderableListView","ExpansionPanelList",
                 "Table", "CustomScrollView", "SliverToBoxAdapter", "SliverPadding", "SliverList",
-                "SliverGrid", "SliverFillRemaining", "SliverAppBar"
+                "SliverGrid", "SliverFillRemaining", "SliverAppBar",
+                // Cupertino / 其它补充
+                "CupertinoButton", "CupertinoSwitch", "CupertinoSlider", "CupertinoAlertDialog",
+                "CupertinoDatePicker", "CupertinoTimerPicker", "CupertinoNavigationBar",
+                "NavigationDrawer", "MaterialBanner", "SearchBar", "ListWheelScrollView"
         };
         for (String n : names) {
             TYPES.put(n, n);

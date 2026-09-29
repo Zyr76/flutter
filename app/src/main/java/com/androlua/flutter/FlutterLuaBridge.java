@@ -586,31 +586,33 @@ public final class FlutterLuaBridge {
                 }
                 synchronized (L) {
                     try {
-                        LuaObject callback = L.getLuaObject("onFlutterEvent");
-                        if (!callback.isFunction()) {
-                            callback = L.getLuaObject("收到Flutter事件");
-                        }
-                        if (callback.isFunction()) {
-                            callback.push();
-                            LuaJson.pushJson(L, json);
-                            pcallChecked(L, 1, "onFlutterEvent");
-                            return;
-                        }
-                        // AndroLua 风格：事件名 -> 同名全局 Lua 函数
                         org.json.JSONObject o = new org.json.JSONObject(json);
                         String name = o.optString("name", null);
-                        if (name == null || name.isEmpty()) {
-                            return;
+
+                        // 分发顺序：具体回调先走，总监听（onFlutterEvent）最后旁路通知。
+                        // 以前定义了就 return，会把 h.onClick / 同名全局函数全吞掉。
+                        if (name != null && !name.isEmpty()) {
+                            // 1) AndroLua 风格：事件名 -> 同名全局 Lua 函数
+                            LuaObject fn = L.getLuaObject(name);
+                            if (fn.isFunction()) {
+                                fn.push();
+                                LuaJson.pushJava(L, o.opt("data"));
+                                pcallChecked(L, 1, "事件 " + name);
+                            }
+                            // 2) id 句柄回调：h.onClick = fn / h.onChange = fn
+                            dispatchNodeHandler(L, name, o);
                         }
-                        LuaObject fn = L.getLuaObject(name);
-                        if (fn.isFunction()) {
-                            fn.push();
-                            LuaJson.pushJava(L, o.opt("data"));
-                            pcallChecked(L, 1, "事件 " + name);
-                            return;
+
+                        // 3) 总监听：定义了 onFlutterEvent / 收到Flutter事件 就会收到所有事件（不再阻断上面）
+                        LuaObject any = L.getLuaObject("onFlutterEvent");
+                        if (!any.isFunction()) {
+                            any = L.getLuaObject("收到Flutter事件");
                         }
-                        // id 句柄回调：h.onClick = fn / h.onChange = fn（由 __flutter_handlers 保存）
-                        dispatchNodeHandler(L, name, o);
+                        if (any.isFunction()) {
+                            any.push();
+                            LuaJson.pushJson(L, json);
+                            pcallChecked(L, 1, "onFlutterEvent");
+                        }
                     } catch (Exception e) {
                         logError("处理 Flutter 事件失败: " + json, e);
                     }
