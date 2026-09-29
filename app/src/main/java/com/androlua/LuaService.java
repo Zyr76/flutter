@@ -19,6 +19,7 @@ import android.os.Message;
 import android.util.Log;
 import android.widget.Toast;
 
+import com.androlua.flutter.FlutterLua;
 import com.androlua.flutter.FlutterLuaBridge;
 import com.luajava.JavaFunction;
 import com.luajava.LuaException;
@@ -341,6 +342,10 @@ public class LuaService extends Service implements LuaContext,LuaBroadcastReceiv
 		runFunc("onDestroy");
 		if(mReceiver!=null)
 		unregisterReceiver(mReceiver);
+		FlutterLua flutter = FlutterLua.peek(this);
+		if (flutter != null) {
+			flutter.onDestroy();
+		}
 		super.onDestroy();
 	}
 

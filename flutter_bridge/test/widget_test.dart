@@ -201,4 +201,102 @@ void main() {
     final e = events.firstWhere((x) => x['name'] == 'h');
     expect((e['data'] as Map)['type'], 'click');
   });
+
+  testWidgets('稳定 key：相同结构全量重建不丢失交互状态', (tester) async {
+    Widget build() => MaterialApp(
+          home: Scaffold(
+            body: Renderer.build(jsonEncode({
+              '1': 'Column',
+              '2': {'1': 'Switch', 'value': false},
+            })),
+          ),
+        );
+    await tester.pumpWidget(build());
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, true);
+    // 同结构重新渲染（模拟每次 render 全量重建），用户切换的状态应保留
+    await tester.pumpWidget(build());
+    expect(tester.widget<Switch>(find.byType(Switch)).value, true);
+  });
+
+  testWidgets('受控组件：Lua 回写不同 value 时同步更新', (tester) async {
+    Widget build(bool v) => MaterialApp(
+          home: Scaffold(
+            body: Renderer.build(jsonEncode({
+              '1': 'Column',
+              '2': {'1': 'Switch', 'value': v},
+            })),
+          ),
+        );
+    await tester.pumpWidget(build(false));
+    await tester.pumpWidget(build(true));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).value, true);
+  });
+
+  testWidgets('受控组件：Lua 回写 TextField.text', (tester) async {
+    Widget build(String s) => MaterialApp(
+          home: Scaffold(
+            body: Renderer.build(jsonEncode({'1': 'TextField', 'text': s})),
+          ),
+        );
+    await tester.pumpWidget(build('a'));
+    await tester.pumpWidget(build('b'));
+    await tester.pumpAndSettle();
+    expect(find.text('b'), findsOneWidget);
+  });
+
+  testWidgets('新增控件：Badge/Tooltip/SwitchListTile/CheckboxListTile/ExpansionTile/AnimatedOpacity',
+      (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'Badge', 'label': '3', 'child': {'1': 'Icon', 'icon': 'mail'}},
+      '3': {'1': 'Tooltip', 'message': '提示', 'child': {'1': 'Text', 'text': '悬停'}},
+      '4': {'1': 'SwitchListTile', 'title': '开关项', 'value': true},
+      '5': {'1': 'CheckboxListTile', 'title': '复选项', 'value': false},
+      '6': {
+        '1': 'ExpansionTile',
+        'title': '展开',
+        'children': [
+          {'1': 'Text', 'text': '内容X'},
+        ],
+      },
+      '7': {'1': 'AnimatedOpacity', 'opacity': 0.5, 'duration': 100, 'child': {'1': 'Text', 'text': '淡'}},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byType(Badge), findsOneWidget);
+    expect(find.byType(Tooltip), findsOneWidget);
+    expect(find.byType(SwitchListTile), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsOneWidget);
+    expect(find.byType(ExpansionTile), findsOneWidget);
+    expect(find.byType(AnimatedOpacity), findsOneWidget);
+    expect(find.text('开关项'), findsOneWidget);
+  });
+
+  testWidgets('DataTable 渲染', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'DataTable',
+      'columns': ['名称', '数量'],
+      'rows': [
+        ['A', '1'],
+        ['B', '2'],
+      ],
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byType(DataTable), findsOneWidget);
+    expect(find.text('名称'), findsOneWidget);
+    expect(find.text('B'), findsOneWidget);
+  });
+
+  testWidgets('Radio 套 RadioGroup 渲染（避免已弃用参数）', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Radio',
+      'value': 'a',
+      'groupValue': 'a',
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byWidgetPredicate((w) => w is Radio), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is RadioGroup<dynamic>), findsOneWidget);
+  });
 }

@@ -337,9 +337,60 @@ class Props {
       color: p.color('color') ?? p.color('textColor'),
       fontWeight: fw,
       fontStyle: p.s('fontStyle')?.toLowerCase() == 'italic' ? FontStyle.italic : null,
+      decoration: toTextDecoration(p['decoration']),
       letterSpacing: p.n('letterSpacing'),
       height: p.n('lineHeight') ?? p.n('height'),
     );
+  }
+
+  static TextDecoration? toTextDecoration(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'underline': return TextDecoration.underline;
+      case 'linethrough':
+      case 'line_through':
+      case 'strikethrough': return TextDecoration.lineThrough;
+      case 'overline': return TextDecoration.overline;
+      case 'none': return TextDecoration.none;
+      default: return null;
+    }
+  }
+
+  static BoxFit toBoxFit(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'contain': return BoxFit.contain;
+      case 'fill': return BoxFit.fill;
+      case 'fitwidth':
+      case 'fit_width': return BoxFit.fitWidth;
+      case 'fitheight':
+      case 'fit_height': return BoxFit.fitHeight;
+      case 'none': return BoxFit.none;
+      case 'scaledown':
+      case 'scale_down': return BoxFit.scaleDown;
+      default: return BoxFit.cover;
+    }
+  }
+
+  static TextOverflow? toOverflow(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'ellipsis': return TextOverflow.ellipsis;
+      case 'clip': return TextOverflow.clip;
+      case 'fade': return TextOverflow.fade;
+      case 'visible': return TextOverflow.visible;
+      default: return null;
+    }
+  }
+
+  static TextInputType? toKeyboardType(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'number':
+      case 'phone': return TextInputType.phone;
+      case 'decimal': return const TextInputType.numberWithOptions(decimal: true);
+      case 'email': return TextInputType.emailAddress;
+      case 'url': return TextInputType.url;
+      case 'multiline': return TextInputType.multiline;
+      case 'text': return TextInputType.text;
+      default: return null;
+    }
   }
 
   static List<dynamic> toList(dynamic v) {

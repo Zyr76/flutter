@@ -3,9 +3,11 @@ package com.androlua.flutter;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import com.androlua.LuaContext;
 
+import java.lang.ref.WeakReference;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +39,8 @@ public class FlutterLua {
 
     public static final String CHANNEL = "androlua/flutter";
 
+    private static final String TAG = "FlutterLua";
+
     private static final Map<LuaContext, FlutterLua> HOLDERS =
             Collections.synchronizedMap(new WeakHashMap<LuaContext, FlutterLua>());
 
@@ -53,7 +57,11 @@ public class FlutterLua {
         void onResult(Object result, String error);
     }
 
-    private final LuaContext luaContext;
+    /**
+     * 弱引用持有 LuaContext。HOLDERS 是 key=context 的 WeakHashMap，若这里再用强引用持有 context，
+     * value 会反向强引用 key，WeakHashMap 永远不会回收条目（经典 WeakHashMap 泄漏陷阱）。
+     */
+    private final WeakReference<LuaContext> luaContextRef;
     private final Context context;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final FlutterEngine engine;
@@ -64,7 +72,7 @@ public class FlutterLua {
     private boolean resumed;
 
     private FlutterLua(LuaContext luaContext) {
-        this.luaContext = luaContext;
+        this.luaContextRef = new WeakReference<LuaContext>(luaContext);
         this.context = luaContext.getContext();
         Context app = context.getApplicationContext();
 
@@ -146,6 +154,20 @@ public class FlutterLua {
         return HOLDERS.get(context);
     }
 
+    /**
+     * 显式销毁某个 context 的 FlutterLua（引擎+FlutterView）并从持有表中移除。
+     * Activity/Service 等拥有生命周期钩子的 context 应在 onDestroy 时调用（或调用 {@link #onDestroy()}）。
+     */
+    public static void destroy(LuaContext context) {
+        if (context == null) {
+            return;
+        }
+        FlutterLua holder = HOLDERS.remove(context);
+        if (holder != null) {
+            holder.teardown();
+        }
+    }
+
     public FlutterView getView() {
         return flutterView;
     }
@@ -155,6 +177,25 @@ public class FlutterLua {
     }
 
     /** 把 widget 描述（JSON）推给 Dart，重建 Flutter UI。 */
+    /**
+     * 把一条原生 -> Flutter 事件派发给已注册的 EventSink（用于 dartCall 主线程异步化后回传结果等）。
+     * dataJson 需为合法 JSON 片段。
+     */
+    public void deliverEvent(final String name, final String dataJson) {
+        final EventSink sink = eventSink;
+        if (sink == null) {
+            Log.w(TAG, "deliverEvent(" + name + ") 被忽略：尚未注册 EventSink");
+            return;
+        }
+        final String json = "{\"name\":" + quote(name) + ",\"data\":" + (dataJson == null ? "null" : dataJson) + "}";
+        runOnMain(new Runnable() {
+            @Override
+            public void run() {
+                sink.onFlutterEvent(json);
+            }
+        });
+    }
+
     public void render(final String json) {
         runOnMain(new Runnable() {
             @Override
@@ -186,6 +227,11 @@ public class FlutterLua {
                     "dartCall 不能在主线程同步调用：Android 需要主线程空闲才能收到 Dart 应答。"
                             + "请用 thread { ... } 包起来，或改用 dartCallAsync(name, args, callback)。");
         }
+        return callSyncBlocking(name, argsJson);
+    }
+
+    /** 供内部（主线程异步化路径）复用的阻塞实现；调用方需自行保证不在主线程。 */
+    private Object callSyncBlocking(final String name, final String argsJson) throws InterruptedException {
         final CountDownLatch latch = new CountDownLatch(1);
         final Object[] result = new Object[1];
         mainHandler.post(new Runnable() {
@@ -289,12 +335,45 @@ public class FlutterLua {
     }
 
     public void onDestroy() {
+        LuaContext ctx = luaContextRef.get();
+        if (ctx != null) {
+            HOLDERS.remove(ctx);
+        }
+        teardown();
+    }
+
+    /** 释放引擎与 FlutterView。可重复调用。 */
+    private void teardown() {
         try {
             flutterView.detachFromFlutterEngine();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.w(TAG, "detachFromFlutterEngine 失败", e);
         }
-        HOLDERS.remove(luaContext);
-        engine.destroy();
+        try {
+            engine.destroy();
+        } catch (Exception e) {
+            Log.w(TAG, "engine.destroy 失败", e);
+        }
+    }
+
+    private static String quote(String s) {
+        if (s == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder(s.length() + 2);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default: sb.append(c);
+            }
+        }
+        return sb.append('"').toString();
     }
 
     private void runOnMain(Runnable r) {

@@ -37,21 +37,21 @@ class Renderer {
   static Widget build(dynamic spec) {
     if (spec is String) {
       try {
-        return _build(jsonDecode(spec)) ?? const SizedBox.shrink();
+        return _build(jsonDecode(spec), '0') ?? const SizedBox.shrink();
       } catch (_) {
         return Text(spec);
       }
     }
-    return _build(spec) ?? const SizedBox.shrink();
+    return _build(spec, '0') ?? const SizedBox.shrink();
   }
 
   // ============================================================
   // 节点构建
   // ============================================================
 
-  static Widget? _build(dynamic spec) {
+  static Widget? _build(dynamic spec, String path) {
     try {
-      return _buildInner(spec);
+      return _buildInner(spec, path);
     } catch (e) {
       return Padding(
         padding: const EdgeInsets.all(4),
@@ -60,18 +60,18 @@ class Renderer {
     }
   }
 
-  static Widget? _buildInner(dynamic spec) {
+  static Widget? _buildInner(dynamic spec, String path) {
     if (spec == null) return null;
     if (spec is String) return Text(spec);
     if (spec is num || spec is bool) return Text('$spec');
     if (spec is List) {
       if (spec.isEmpty) return null;
-      return _buildInner(<String, dynamic>{'type': Props.typeName(spec.first), 'children': spec.sublist(1)});
+      return _buildInner(<String, dynamic>{'type': Props.typeName(spec.first), 'children': spec.sublist(1)}, path);
     }
     if (spec is! Map) return const SizedBox.shrink();
 
     final p = Props.of(spec);
-    final children = _children(p['children'] ?? p['child']);
+    final children = _children(p['children'] ?? p['child'], path);
     Widget child0() => children.isNotEmpty ? children.first : const SizedBox.shrink();
 
     final ext = custom[p.type];
@@ -206,7 +206,8 @@ class Renderer {
           textAlign: Props.toTextAlign(p['textAlign']),
           style: Props.toTextStyle(p),
           maxLines: p.i('maxLines'),
-          overflow: p.i('maxLines') != null ? TextOverflow.ellipsis : null,
+          softWrap: p.has('softWrap') ? p.b('softWrap', true) : null,
+          overflow: Props.toOverflow(p['overflow']) ?? (p.i('maxLines') != null ? TextOverflow.ellipsis : null),
         );
         break;
       case 'selectabletext':
@@ -222,12 +223,18 @@ class Renderer {
       case 'image':
         final url = p['url'] ?? p['src'] ?? p['asset'];
         if (url == null) {
-          result = const SizedBox.shrink();
+          result = _imagePlaceholder(p);
         } else {
           final u = url.toString();
-          result = u.startsWith('http')
-              ? Image.network(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: BoxFit.cover)
-              : Image.asset(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: BoxFit.cover);
+          final fit = Props.toBoxFit(p['fit']);
+          Widget img = u.startsWith('http')
+              ? Image.network(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: fit,
+                  errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'))
+              : Image.asset(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: fit,
+                  errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+          final radius = p.n('radius') ?? p.n('borderRadius');
+          if (radius != null) img = ClipRRect(borderRadius: BorderRadius.circular(radius), child: img);
+          result = img;
         }
         break;
 
@@ -236,7 +243,7 @@ class Renderer {
         final label = (p['text'] ?? p['label'] ?? 'Button').toString();
         final onTap = _tapHandler(p);
         final style = _buttonStyle(p);
-        final child = _widgetOrText(p['child'], label);
+        final child = _widgetOrText(p['child'], label, '$path/child');
         result = Padding(
           padding: p.inset('padding') ?? EdgeInsets.zero,
           child: p.type == 'textbutton'
@@ -290,17 +297,17 @@ class Renderer {
         break;
       case 'listtile':
         result = ListTile(
-          leading: _slotIcon(p['leading']),
-          title: _slotText(p['title'] ?? p['text']),
-          subtitle: _slotText(p['subtitle']),
-          trailing: _slotText(p['trailing']),
+          leading: _slotIcon(p['leading'], '$path/leading'),
+          title: _slotText(p['title'] ?? p['text'], '$path/title'),
+          subtitle: _slotText(p['subtitle'], '$path/subtitle'),
+          trailing: _slotText(p['trailing'], '$path/trailing'),
           onTap: _tapHandler(p),
         );
         break;
 
       // ---------- 滚动 / 列表 ----------
       case 'listview' || 'list' || 'listviewbuilder':
-        result = _listView(p, children);
+        result = _listView(p, children, path);
         break;
       case 'gridview':
         result = GridView.count(
@@ -325,7 +332,7 @@ class Renderer {
       // ---------- 交互 ----------
       case 'checkbox':
         result = BridgeCheckbox(
-          key: _nodeKey(p),
+          key: _nodeKey(p, path),
           initial: p.b('value'),
           color: p.color('color'),
           onChanged: (v) => _change(p, v),
@@ -333,14 +340,14 @@ class Renderer {
         break;
       case 'switch':
         result = BridgeSwitch(
-          key: _nodeKey(p),
+          key: _nodeKey(p, path),
           initial: p.b('value'),
           onChanged: (v) => _change(p, v),
         );
         break;
       case 'slider':
         result = BridgeSlider(
-          key: _nodeKey(p),
+          key: _nodeKey(p, path),
           initial: p.n('value') ?? 0,
           min: p.n('min') ?? 0,
           max: p.n('max') ?? 1,
@@ -349,11 +356,18 @@ class Renderer {
         break;
       case 'textfield' || 'edittext':
         result = BridgeTextField(
-          key: _nodeKey(p),
+          key: _nodeKey(p, path),
           hint: p.s('hint') ?? _decText(p, 'hintText'),
           label: p.s('label') ?? _decText(p, 'labelText'),
           initial: p.s('text'),
           maxLines: p.i('maxLines'),
+          obscure: p.b('obscure') || p.b('obscureText') || p.b('password'),
+          maxLength: p.i('maxLength'),
+          keyboardType: Props.toKeyboardType(p['keyboardType'] ?? p['inputType']),
+          prefixIcon: p.s('prefixIcon') ?? p.s('leftIcon'),
+          suffixIcon: p.s('suffixIcon') ?? p.s('rightIcon'),
+          readOnly: p.b('readOnly'),
+          enabled: p.b('enabled', true),
           onChanged: (v) => _change(p, v),
         );
         break;
@@ -371,7 +385,7 @@ class Renderer {
                 decoration: InputDecoration(labelText: _decText(p, 'labelText'), border: const OutlineInputBorder()),
               )
             : BridgeDropdown(
-                key: _nodeKey(p),
+                key: _nodeKey(p, path),
                 initial: p.s('value'),
                 items: p.list('items'),
                 onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
@@ -383,19 +397,19 @@ class Renderer {
         result = Scaffold(
           key: scaffoldKey,
           backgroundColor: p.color('backgroundColor'),
-          appBar: _preferred(_build(p['appBar'])),
-          drawer: _build(p['drawer']),
-          endDrawer: _build(p['endDrawer']),
-          body: _build(p['body']) ?? child0(),
-          bottomNavigationBar: _build(p['bottomNavigationBar']),
-          floatingActionButton: _build(p['floatingActionButton']),
+          appBar: _preferred(_build(p['appBar'], '$path/appBar')),
+          drawer: _build(p['drawer'], '$path/drawer'),
+          endDrawer: _build(p['endDrawer'], '$path/endDrawer'),
+          body: _build(p['body'], '$path/body') ?? child0(),
+          bottomNavigationBar: _build(p['bottomNavigationBar'], '$path/bottomNav'),
+          floatingActionButton: _build(p['floatingActionButton'], '$path/fab'),
         );
         break;
       case 'appbar':
         result = AppBar(
-          title: _build(p['title']),
-          leading: _build(p['leading']),
-          actions: _children(p['actions']),
+          title: _build(p['title'], '$path/title'),
+          leading: _build(p['leading'], '$path/leading'),
+          actions: _children(p['actions'], '$path/actions'),
           elevation: p.n('elevation'),
           backgroundColor: p.color('backgroundColor') ?? p.color('color'),
           foregroundColor: p.color('foregroundColor'),
@@ -409,15 +423,15 @@ class Renderer {
       case 'useraccountsdrawerheader':
         result = UserAccountsDrawerHeader(
           decoration: _decoration(p),
-          accountName: _build(p['accountName']),
-          accountEmail: _build(p['accountEmail']),
-          currentAccountPicture: _build(p['currentAccountPicture']),
-          otherAccountsPictures: _children(p['otherAccountsPictures']),
+          accountName: _build(p['accountName'], '$path/accountName'),
+          accountEmail: _build(p['accountEmail'], '$path/accountEmail'),
+          currentAccountPicture: _build(p['currentAccountPicture'], '$path/avatar'),
+          otherAccountsPictures: _children(p['otherAccountsPictures'], '$path/otherAccounts'),
         );
         break;
       case 'bottomnavigationbar':
         result = BridgeBottomNav(
-          key: _nodeKey(p),
+          key: _nodeKey(p, path),
           items: p.list('items'),
           initialIndex: p.i('currentIndex') ?? 0,
           selectedColor: p.color('selectedItemColor'),
@@ -479,6 +493,170 @@ class Renderer {
         );
         break;
 
+      // ---------- 反馈 / 提示 ----------
+      case 'tooltip':
+        result = Tooltip(
+          message: (p['message'] ?? p['text'] ?? '').toString(),
+          child: child0(),
+        );
+        break;
+      case 'badge':
+        final label = p['label'] ?? p['text'];
+        result = Badge(
+          label: label == null
+              ? null
+              : (label is Map || label is List ? _build(label, '$path/label') : Text(label.toString())),
+          child: children.isEmpty ? null : child0(),
+        );
+        break;
+      case 'placeholder':
+        result = Placeholder(
+          color: p.color('color') ?? const Color(0xFF455A64),
+          strokeWidth: p.n('strokeWidth') ?? 2,
+          fallbackWidth: p.n('fallbackWidth') ?? p.n('width') ?? 100,
+          fallbackHeight: p.n('fallbackHeight') ?? p.n('height') ?? 100,
+          child: children.isEmpty ? null : child0(),
+        );
+        break;
+      case 'refreshindicator':
+        result = RefreshIndicator(
+          onRefresh: () async {
+            final id = p['id'];
+            if (id != null) {
+              FlutterBridge.instance.emit(id.toString(), {'id': id.toString(), 'type': 'refresh'});
+            }
+            await Future<void>.delayed(Duration(milliseconds: p.i('delay') ?? 600));
+          },
+          child: child0(),
+        );
+        break;
+
+      // ---------- 更多 Material 控件 ----------
+      case 'switchlisttile':
+        result = BridgeSwitchListTile(
+          key: _nodeKey(p, path),
+          title: (p['title'] ?? p['text'])?.toString(),
+          subtitle: p.s('subtitle'),
+          initial: p.b('value'),
+          onChanged: (v) => _change(p, v),
+        );
+        break;
+      case 'checkboxlisttile':
+        result = BridgeCheckboxListTile(
+          key: _nodeKey(p, path),
+          title: (p['title'] ?? p['text'])?.toString(),
+          subtitle: p.s('subtitle'),
+          initial: p.b('value'),
+          onChanged: (v) => _change(p, v),
+        );
+        break;
+      case 'radiolisttile':
+        result = RadioGroup<dynamic>(
+          groupValue: p['groupValue'] ?? p['group'],
+          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+          child: RadioListTile<dynamic>(
+            title: _slotText(p['title'] ?? p['text'], '$path/title') ?? const SizedBox.shrink(),
+            subtitle: _slotText(p['subtitle'], '$path/subtitle'),
+            value: p['value'],
+          ),
+        );
+        break;
+      case 'radio':
+        result = RadioGroup<dynamic>(
+          groupValue: p['groupValue'] ?? p['group'],
+          onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
+          child: Radio<dynamic>(value: p['value']),
+        );
+        break;
+      case 'expansiontile':
+        result = ExpansionTile(
+          title: _slotText(p['title'] ?? p['text'], '$path/title') ?? const SizedBox.shrink(),
+          subtitle: _slotText(p['subtitle'], '$path/subtitle'),
+          initiallyExpanded: p.b('expanded') || p.b('initiallyExpanded'),
+          children: children,
+        );
+        break;
+      case 'stepper':
+        final steps = p.list('steps');
+        if (steps.isEmpty) {
+          result = const SizedBox.shrink();
+        } else {
+          result = Stepper(
+            currentStep: (p.i('currentStep') ?? 0).clamp(0, steps.length - 1),
+            onStepContinue: _namedEvent(p, 'stepContinue'),
+            onStepCancel: _namedEvent(p, 'stepCancel'),
+            steps: steps.map((s) {
+              final sp = Props.of(s);
+              return Step(
+                title: _slotText(sp['title'], '$path/step/title') ?? const SizedBox.shrink(),
+                subtitle: _slotText(sp['subtitle'], '$path/step/subtitle'),
+                content: _slotText(sp['content'], '$path/step/content') ?? const SizedBox.shrink(),
+              );
+            }).toList(),
+          );
+        }
+        break;
+      case 'datatable':
+        final columns = p.list('columns');
+        final rowsRaw = p.list('rows');
+        if (columns.isEmpty) {
+          result = const SizedBox.shrink();
+        } else {
+          result = DataTable(
+            columns: [
+              for (var i = 0; i < columns.length; i++)
+                DataColumn(label: _dataCell(columns[i], '$path/col$i')),
+            ],
+            rows: [
+              for (var r = 0; r < rowsRaw.length; r++)
+                DataRow(
+                  cells: [
+                    for (var c = 0; c < Props.toList(rowsRaw[r]).length; c++)
+                      DataCell(_dataCell(Props.toList(rowsRaw[r])[c], '$path/r$r/c$c')),
+                  ],
+                ),
+            ],
+          );
+        }
+        break;
+
+      // ---------- 日期 ----------
+      case 'calendardatepicker' || 'datepicker':
+        final now = DateTime.now();
+        final first = _parseDate(p['firstDate']) ?? DateTime(now.year - 1, now.month, now.day);
+        final last = _parseDate(p['lastDate']) ?? DateTime(now.year + 1, now.month, now.day);
+        var initial = _parseDate(p['initialDate']) ?? now;
+        if (initial.isBefore(first)) initial = first;
+        if (initial.isAfter(last)) initial = last;
+        result = CalendarDatePicker(
+          initialDate: initial,
+          firstDate: first,
+          lastDate: last,
+          onDateChanged: (d) => _emit(p['onChange'], d.toIso8601String(), fallback: p.map),
+        );
+        break;
+
+      // ---------- 动画 ----------
+      case 'animatedopacity':
+        result = AnimatedOpacity(
+          opacity: (p.n('opacity') ?? 1.0).clamp(0.0, 1.0),
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: child0(),
+        );
+        break;
+      case 'animatedcontainer':
+        result = AnimatedContainer(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          width: Props.dim(p['width']),
+          height: Props.dim(p['height']),
+          alignment: p.align('alignment'),
+          padding: p.inset('padding'),
+          margin: p.inset('margin'),
+          decoration: _decoration(p),
+          child: child0(),
+        );
+        break;
+
       // ---------- 原生 ----------
       case 'androidview':
       case 'android':
@@ -507,7 +685,7 @@ class Renderer {
   // 列表：ListView.builder（懒加载）
   // ============================================================
 
-  static Widget _listView(Props p, List<Widget> children) {
+  static Widget _listView(Props p, List<Widget> children, String path) {
     final padding = p.inset('padding');
     final physics = Props.toPhysics(p['physics']);
     final shrinkWrap = p.b('shrinkWrap');
@@ -523,7 +701,7 @@ class Renderer {
         shrinkWrap: shrinkWrap,
         scrollDirection: axis,
         itemCount: count,
-        itemBuilder: (ctx, i) => _build(_subst(template, i)) ?? const SizedBox.shrink(),
+        itemBuilder: (ctx, i) => _build(_subst(template, i), '$path/$i') ?? const SizedBox.shrink(),
       );
     }
     return ListView.builder(
@@ -646,35 +824,45 @@ class Renderer {
     return out;
   }
 
-  static Key? _nodeKey(Props p) {
+  static Key? _nodeKey(Props p, String path) {
     final id = p['id'] ?? p['key'];
-    return id == null ? null : ValueKey(id.toString());
+    if (id != null) return ValueKey('id:$id');
+    // 结构路径派生的稳定 key：UI 结构不变时，StatefulWidget 的 State 能跨重建保留，
+    // 让 Flutter 自身的 reconciliation 生效，避免每次 render 丢失交互状态。
+    return ValueKey('path:$path');
   }
 
-  static List<Widget> _children(dynamic raw) {
-    if (raw is List) return raw.map((e) => _build(e)).whereType<Widget>().toList();
+  static List<Widget> _children(dynamic raw, String path) {
+    if (raw is List) {
+      final out = <Widget>[];
+      for (var i = 0; i < raw.length; i++) {
+        final w = _build(raw[i], '$path/$i');
+        if (w != null) out.add(w);
+      }
+      return out;
+    }
     if (raw is Map) {
-      final one = _build(raw);
+      final one = _build(raw, path);
       return one == null ? [] : [one];
     }
     return [];
   }
 
 
-  static Widget _widgetOrText(dynamic spec, String fallback) {
-    if (spec is Map || spec is List) return _build(spec) ?? Text(fallback);
+  static Widget _widgetOrText(dynamic spec, String fallback, String path) {
+    if (spec is Map || spec is List) return _build(spec, path) ?? Text(fallback);
     return Text(fallback);
   }
 
-  static Widget? _slotText(dynamic v) {
+  static Widget? _slotText(dynamic v, String path) {
     if (v == null) return null;
-    if (v is Map || v is List) return _build(v);
+    if (v is Map || v is List) return _build(v, path);
     return Text(v.toString());
   }
 
-  static Widget? _slotIcon(dynamic v) {
+  static Widget? _slotIcon(dynamic v, String path) {
     if (v == null) return null;
-    if (v is Map || v is List) return _build(v);
+    if (v is Map || v is List) return _build(v, path);
     return Icon(Props.toIcon(v));
   }
 
@@ -697,6 +885,41 @@ class Renderer {
     if (w == null) return null;
     if (w is PreferredSizeWidget) return w;
     return PreferredSize(preferredSize: const Size.fromHeight(kToolbarHeight), child: w);
+  }
+
+  /// 图片占位：url 缺失或加载失败时显示，避免空白。
+  static Widget _imagePlaceholder(Props p, {String? error}) {
+    final w = Props.dim(p['width']);
+    final h = Props.dim(p['height']);
+    final box = Container(
+      width: (w == null || w == double.infinity) ? null : w,
+      height: (h == null || h == double.infinity) ? null : h,
+      color: p.color('placeholderColor') ?? const Color(0xFFEEEEEE),
+      alignment: Alignment.center,
+      child: const Icon(Icons.broken_image, color: Colors.grey, size: 24),
+    );
+    return error == null ? box : Tooltip(message: error, child: box);
+  }
+
+  /// 带名字的事件：有 id 时发出指定 type（用于 stepper 等非点击控件）。
+  static VoidCallback? _namedEvent(Props p, String type) {
+    final id = p['id'];
+    if (id == null) return null;
+    final sid = id.toString();
+    return () => FlutterBridge.instance.emit(sid, {'id': sid, 'type': type});
+  }
+
+  /// DataTable 单元格：子节点或纯文本。
+  static Widget _dataCell(dynamic v, String path) {
+    if (v is Map || v is List) return _build(v, path) ?? const SizedBox.shrink();
+    return Text(v?.toString() ?? '');
+  }
+
+  /// 日期解析：支持 ISO 字符串或毫秒时间戳。
+  static DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+    return DateTime.tryParse(v.toString());
   }
 
   // ---------- 回調 ----------
@@ -891,6 +1114,12 @@ class BridgeSwitch extends StatefulWidget {
 class _BridgeSwitchState extends State<BridgeSwitch> {
   late bool _value = widget.initial;
   @override
+  void didUpdateWidget(BridgeSwitch old) {
+    super.didUpdateWidget(old);
+    // 受控：Lua 重新 render 时若 value 变了，则同步回内部状态（不依赖重新创建 widget）。
+    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+  }
+  @override
   Widget build(BuildContext context) => Switch(
         value: _value,
         onChanged: (v) { setState(() => _value = v); widget.onChanged(v); },
@@ -909,9 +1138,66 @@ class BridgeCheckbox extends StatefulWidget {
 class _BridgeCheckboxState extends State<BridgeCheckbox> {
   late bool _value = widget.initial;
   @override
+  void didUpdateWidget(BridgeCheckbox old) {
+    super.didUpdateWidget(old);
+    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+  }
+  @override
   Widget build(BuildContext context) => Checkbox(
         value: _value,
         activeColor: widget.color,
+        onChanged: (v) { setState(() => _value = v == true); widget.onChanged(v == true); },
+      );
+}
+
+class BridgeSwitchListTile extends StatefulWidget {
+  const BridgeSwitchListTile({super.key, this.title, this.subtitle, required this.initial, required this.onChanged});
+  final String? title;
+  final String? subtitle;
+  final bool initial;
+  final ValueChanged<bool> onChanged;
+  @override
+  State<BridgeSwitchListTile> createState() => _BridgeSwitchListTileState();
+}
+
+class _BridgeSwitchListTileState extends State<BridgeSwitchListTile> {
+  late bool _value = widget.initial;
+  @override
+  void didUpdateWidget(BridgeSwitchListTile old) {
+    super.didUpdateWidget(old);
+    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+  }
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+        title: widget.title == null ? null : Text(widget.title!),
+        subtitle: widget.subtitle == null ? null : Text(widget.subtitle!),
+        value: _value,
+        onChanged: (v) { setState(() => _value = v); widget.onChanged(v); },
+      );
+}
+
+class BridgeCheckboxListTile extends StatefulWidget {
+  const BridgeCheckboxListTile({super.key, this.title, this.subtitle, required this.initial, required this.onChanged});
+  final String? title;
+  final String? subtitle;
+  final bool initial;
+  final ValueChanged<bool> onChanged;
+  @override
+  State<BridgeCheckboxListTile> createState() => _BridgeCheckboxListTileState();
+}
+
+class _BridgeCheckboxListTileState extends State<BridgeCheckboxListTile> {
+  late bool _value = widget.initial;
+  @override
+  void didUpdateWidget(BridgeCheckboxListTile old) {
+    super.didUpdateWidget(old);
+    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+  }
+  @override
+  Widget build(BuildContext context) => CheckboxListTile(
+        title: widget.title == null ? null : Text(widget.title!),
+        subtitle: widget.subtitle == null ? null : Text(widget.subtitle!),
+        value: _value,
         onChanged: (v) { setState(() => _value = v == true); widget.onChanged(v == true); },
       );
 }
@@ -929,6 +1215,11 @@ class BridgeSlider extends StatefulWidget {
 class _BridgeSliderState extends State<BridgeSlider> {
   late double _value = widget.initial;
   @override
+  void didUpdateWidget(BridgeSlider old) {
+    super.didUpdateWidget(old);
+    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+  }
+  @override
   Widget build(BuildContext context) => Slider(
         value: _value.clamp(widget.min, widget.max),
         min: widget.min,
@@ -938,11 +1229,32 @@ class _BridgeSliderState extends State<BridgeSlider> {
 }
 
 class BridgeTextField extends StatefulWidget {
-  const BridgeTextField({super.key, this.hint, this.label, this.initial, this.maxLines, required this.onChanged});
+  const BridgeTextField({
+    super.key,
+    this.hint,
+    this.label,
+    this.initial,
+    this.maxLines,
+    this.obscure = false,
+    this.maxLength,
+    this.keyboardType,
+    this.prefixIcon,
+    this.suffixIcon,
+    this.readOnly = false,
+    this.enabled = true,
+    required this.onChanged,
+  });
   final String? hint;
   final String? label;
   final String? initial;
   final int? maxLines;
+  final bool obscure;
+  final int? maxLength;
+  final TextInputType? keyboardType;
+  final String? prefixIcon;
+  final String? suffixIcon;
+  final bool readOnly;
+  final bool enabled;
   final ValueChanged<String> onChanged;
   @override
   State<BridgeTextField> createState() => _BridgeTextFieldState();
@@ -951,12 +1263,31 @@ class BridgeTextField extends StatefulWidget {
 class _BridgeTextFieldState extends State<BridgeTextField> {
   late final TextEditingController _controller = TextEditingController(text: widget.initial ?? '');
   @override
+  void didUpdateWidget(BridgeTextField old) {
+    super.didUpdateWidget(old);
+    // 受控：Lua 回写 text 且与当前内容不同时更新（避免输入中被打断）。
+    final next = widget.initial ?? '';
+    if (next != old.initial && _controller.text != next) {
+      _controller.text = next;
+    }
+  }
+  @override
   void dispose() { _controller.dispose(); super.dispose(); }
   @override
   Widget build(BuildContext context) => TextField(
         controller: _controller,
-        maxLines: widget.maxLines,
-        decoration: InputDecoration(hintText: widget.hint, labelText: widget.label),
+        maxLines: widget.obscure ? 1 : widget.maxLines,
+        obscureText: widget.obscure,
+        maxLength: widget.maxLength,
+        keyboardType: widget.keyboardType,
+        readOnly: widget.readOnly,
+        enabled: widget.enabled,
+        decoration: InputDecoration(
+          hintText: widget.hint,
+          labelText: widget.label,
+          prefixIcon: widget.prefixIcon != null ? Icon(Props.toIcon(widget.prefixIcon)) : null,
+          suffixIcon: widget.suffixIcon != null ? Icon(Props.toIcon(widget.suffixIcon)) : null,
+        ),
         onChanged: widget.onChanged,
       );
 }
@@ -983,6 +1314,12 @@ class BridgeBottomNav extends StatefulWidget {
 
 class _BridgeBottomNavState extends State<BridgeBottomNav> {
   late int _index = widget.initialIndex;
+
+  @override
+  void didUpdateWidget(BridgeBottomNav old) {
+    super.didUpdateWidget(old);
+    if (widget.initialIndex != old.initialIndex) setState(() => _index = widget.initialIndex);
+  }
 
   List<BottomNavigationBarItem> _items() {
     return widget.items.map((e) {
@@ -1018,6 +1355,11 @@ class BridgeDropdown extends StatefulWidget {
 
 class _BridgeDropdownState extends State<BridgeDropdown> {
   late String? _value = widget.initial;
+  @override
+  void didUpdateWidget(BridgeDropdown old) {
+    super.didUpdateWidget(old);
+    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+  }
   @override
   Widget build(BuildContext context) {
     return DropdownButton<String>(

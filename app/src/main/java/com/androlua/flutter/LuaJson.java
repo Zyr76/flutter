@@ -344,7 +344,13 @@ public final class LuaJson {
                 "Transform", "FractionallySizedBox", "DropdownButton", "DropdownButtonFormField",
                 // 二维码 / 地图 / 图表 / 媒体
                 "QrCode", "QrImage", "FlutterMap", "Map", "Chart", "LineChart", "BarChart", "PieChart",
-                "VideoPlayer", "Video", "AudioPlayer", "Audio"
+                "VideoPlayer", "Video", "AudioPlayer", "Audio",
+                // 反馈 / 更多 Material 控件 / 日期 / 动画
+                "Tooltip", "Badge", "Placeholder", "RefreshIndicator",
+                "SwitchListTile", "CheckboxListTile", "RadioListTile", "Radio",
+                "ExpansionTile", "Stepper", "DataTable",
+                "CalendarDatePicker", "DatePicker",
+                "AnimatedOpacity", "AnimatedContainer"
         };
         for (String n : names) {
             TYPES.put(n, n);

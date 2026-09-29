@@ -1,5 +1,7 @@
 package com.androlua.flutter;
 
+import android.os.Looper;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -18,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.regex.Pattern;
 
 /**
  * 把 Flutter 能力注册成 Lua 全局函数，并提供「AndroLua 布局表」风格 + 中文语法的入口。
@@ -44,6 +47,8 @@ import java.util.WeakHashMap;
  * </pre>
  */
 public final class FlutterLuaBridge {
+
+    private static final String TAG = "FlutterLuaBridge";
 
     private static final Map<LuaContext, LuaState> STATES =
             Collections.synchronizedMap(new WeakHashMap<LuaContext, LuaState>());
@@ -117,8 +122,9 @@ public final class FlutterLuaBridge {
                                     callback.push();
                                     LuaJson.pushJava(L, result);
                                     L.pushString(error);
-                                    L.pcall(2, 0, 0);
-                                } catch (Exception ignored) {
+                                    pcallChecked(L, 2, "dartCall 回调 " + name);
+                                } catch (Exception e) {
+                                    logError("dartCall 回调异常: " + name, e);
                                 }
                             }
                         }
@@ -126,19 +132,49 @@ public final class FlutterLuaBridge {
                     return 0;
                 }
 
+                if (Looper.myLooper() == Looper.getMainLooper()) {
+                    // 主线程不能同步等待 Dart 应答（会 ANR）。自动异步化，结果通过 dartCallResult 事件回传。
+                    warn(L, "dartCall(\"" + name + "\") 在主线程不能同步返回，已自动异步化；"
+                            + "结果将作为 dartCallResult 事件回传（可用 function onFlutterEvent(e) 接收），"
+                            + "或改用 dartCall(name, args, callback) 拿回调。");
+                    flutter.callAsync(name, args, new FlutterLua.ResultCallback() {
+                        @Override
+                        public void onResult(Object result, String error) {
+                            flutter.deliverEvent("dartCallResult", dartCallResultJson(name, result, error));
+                        }
+                    });
+                    L.pushNil();
+                    return 1;
+                }
+
                 try {
                     LuaJson.pushJava(L, flutter.callSync(name, args));
-                } catch (IllegalStateException e) {
-                    warn(L, e.getMessage());
-                    L.pushNil();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    logError("dartCall(" + name + ") 被中断", e);
                     L.pushNil();
                 }
                 return 1;
             }
         };
         reg(call, "dartCall", "调用Dart", "dartCallAsync", "异步调用Dart", "调用Dart异步");
+
+        // ---- flutterNode(id) / 获取Flutter节点 ----
+        // id 与已有全局冲突时（bindIds 会跳过绑定），可用它按名字安全取回节点句柄。
+        JavaFunction node = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                if (L.getTop() < 2 || L.isNoneOrNil(2)) {
+                    L.pushNil();
+                    return 1;
+                }
+                L.getGlobal("__flutter_node");
+                L.pushString(L.toString(2));
+                L.pcall(1, 1, 0);
+                return 1;
+            }
+        };
+        reg(node, "flutterNode", "Flutter节点", "获取Flutter节点");
 
         // ---- flutterEvent(name [, data]) ----
         JavaFunction event = new JavaFunction(L) {
@@ -218,15 +254,22 @@ public final class FlutterLuaBridge {
             Set<String> ids = new LinkedHashSet<String>();
             collectIds(root, ids);
             for (String id : ids) {
+                if (!isSafeGlobalName(L, id)) {
+                    warn(L, "id \"" + id + "\" 会覆盖已有全局变量或不是合法标识符，已跳过绑定；"
+                            + "可用 flutterNode(\"" + id + "\") 取该节点句柄。");
+                    continue;
+                }
                 L.getGlobal("__flutter_node");
                 L.pushString(id);
                 if (L.pcall(1, 1, 0) == 0) {
                     L.setGlobal(id);
                 } else {
+                    logError("创建 id 句柄失败: " + id + " -> " + L.toString(-1), null);
                     L.pop(1);
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logError("bindIds 解析失败", e);
         }
     }
 
@@ -248,6 +291,34 @@ public final class FlutterLuaBridge {
         }
     }
 
+    /**
+     * 判断能否安全地把 id 作为全局句柄绑定：
+     * <ul>
+     *   <li>必须是合法 Lua 标识符；</li>
+     *   <li>目标全局为 nil（尚未占用），或已是本机制生成的代理表（重复渲染同一 id）——代理表带 __id 字段。</li>
+     * </ul>
+     * 否则绑定会覆盖用户已有变量（如 print/_G），因此拒绝。
+     */
+    private static boolean isSafeGlobalName(LuaState L, String id) {
+        if (id == null || !Pattern.matches("[A-Za-z_][A-Za-z0-9_]*", id)) {
+            return false;
+        }
+        L.getGlobal(id);
+        int type = L.type(-1);
+        boolean ok;
+        if (type == LuaState.LUA_TNIL) {
+            ok = true;
+        } else if (type == LuaState.LUA_TTABLE) {
+            L.getField(-1, "__id");
+            ok = L.isString(-1) && id.equals(L.toString(-1));
+            L.pop(1);
+        } else {
+            ok = false;
+        }
+        L.pop(1);
+        return ok;
+    }
+
     /** 把事件分发给对应 id 句柄上注册的回调（onClick / onChange）。 */
     private static void dispatchNodeHandler(LuaState L, String id, JSONObject event) throws LuaException {
         LuaObject handlers = L.getLuaObject("__flutter_handlers");
@@ -267,7 +338,7 @@ public final class FlutterLuaBridge {
             if (fn != null && fn.isFunction()) {
                 fn.push();
                 LuaJson.pushJava(L, event.opt("data"));
-                L.pcall(1, 0, 0);
+                pcallChecked(L, 1, "id 句柄回调 " + id + "." + k);
                 return;
             }
         }
@@ -276,6 +347,45 @@ public final class FlutterLuaBridge {
     private static void reg(JavaFunction f, String... names) throws LuaException {
         for (String n : names) {
             f.register(n);
+        }
+    }
+
+    private static void logError(String msg, Throwable t) {
+        if (t != null) {
+            Log.e(TAG, msg, t);
+        } else {
+            Log.e(TAG, msg);
+        }
+    }
+
+    /** 执行 Lua 函数并检查错误，失败时记录（不再静默吞掉）。 */
+    private static void pcallChecked(LuaState L, int nargs, String what) {
+        if (L.pcall(nargs, 0, 0) != 0) {
+            logError(what + " 执行出错: " + L.toString(-1), null);
+            L.pop(1);
+        }
+    }
+
+    /** 把 dartCall 的异步结果序列化成事件 data 的 JSON。 */
+    private static String dartCallResultJson(String name, Object result, String error) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("name", name);
+            o.put("error", error == null ? JSONObject.NULL : error);
+            Object r;
+            if (result == null) {
+                r = JSONObject.NULL;
+            } else if (result instanceof Map || result instanceof java.util.List
+                    || result instanceof Number || result instanceof Boolean || result instanceof String) {
+                r = result;
+            } else {
+                r = LuaJson.toJsonString(result);
+            }
+            o.put("result", r);
+            return o.toString();
+        } catch (Exception e) {
+            logError("dartCallResult 序列化失败", e);
+            return "{\"name\":" + quote(name) + ",\"error\":\"result serialize failed\"}";
         }
     }
 
@@ -297,7 +407,7 @@ public final class FlutterLuaBridge {
                         if (callback.isFunction()) {
                             callback.push();
                             LuaJson.pushJson(L, json);
-                            L.pcall(1, 0, 0);
+                            pcallChecked(L, 1, "onFlutterEvent");
                             return;
                         }
                         // AndroLua 风格：事件名 -> 同名全局 Lua 函数
@@ -310,12 +420,13 @@ public final class FlutterLuaBridge {
                         if (fn.isFunction()) {
                             fn.push();
                             LuaJson.pushJava(L, o.opt("data"));
-                            L.pcall(1, 0, 0);
+                            pcallChecked(L, 1, "事件 " + name);
                             return;
                         }
                         // id 句柄回调：h.onClick = fn / h.onChange = fn（由 __flutter_handlers 保存）
                         dispatchNodeHandler(L, name, o);
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        logError("处理 Flutter 事件失败: " + json, e);
                     }
                 }
             }
@@ -335,7 +446,8 @@ public final class FlutterLuaBridge {
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT));
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logError("把 FlutterView 加入容器失败", e);
         }
     }
 
