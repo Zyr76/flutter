@@ -254,15 +254,20 @@ public final class FlutterLuaBridge {
      * <pre>
      * local layout = { Column, { Button, text="4664", id="h" } }
      * activity.setContentView(渲染Flutter(layout))
-     * function h.onClick() print("哈哈哈") end   -- 等价 h.onClick = function() ... end
+     * function h.onClick() print("哈哈哈") end      -- 事件：h.onClick = fn
+     * h.dart.Text = "你好"                          -- 属性：h.dart.<属性名> = 值（推荐）
      * </pre>
-     * `id` 会在渲染时生成一个 Lua 句柄（代理表），对它的 onClick/onChange 赋值会被存进 __flutter_handlers。
+     * `id` 会在渲染时生成一个 Lua 句柄（代理表）：h.onClick/h.onChange 存事件回调；
+     * h.dart.<k> 一律走属性更新（命令式局部刷新）。
      */
     private static void installNodeHandlers(LuaState L) throws LuaException {
         String chunk =
                 "__flutter_handlers = __flutter_handlers or {}\n"
                         + "function __flutter_node(id)\n"
-                        + "  return setmetatable({ __id = id }, {\n"
+                        + "  local props = setmetatable({}, {\n"
+                        + "    __newindex = function(t, k, v) __flutter_apply(id, k, v) end\n"
+                        + "  })\n"
+                        + "  return setmetatable({ __id = id, dart = props }, {\n"
                         + "    __index = function(t, k) local h = __flutter_handlers[id]; return h and h[k] end,\n"
                         + "    __newindex = function(t, k, v)\n"
                         + "      if k == 'onClick' or k == 'onTap' or k == 'click'\n"

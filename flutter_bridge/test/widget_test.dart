@@ -386,4 +386,19 @@ void main() {
     expect(find.byType(AnimatedCrossFade), findsOneWidget);
     expect(find.text('rarb'), findsOneWidget);
   });
+
+  testWidgets('patch 传 JSON 字符串能正确渲染（回归：之前会当纯文本显示）', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'Text', 'id': 'tv', 'text': '旧'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('旧'), findsOneWidget);
+    // 模拟原生 patch：spec 是节点 JSON 字符串
+    FlutterBridge.instance.nodeSpecs['tv']!.value =
+        jsonEncode({'1': 'Text', 'id': 'tv', 'text': '你好'});
+    await tester.pump();
+    expect(find.text('你好'), findsOneWidget);
+    expect(find.textContaining('"1"'), findsNothing);
+  });
 }

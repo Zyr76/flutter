@@ -83,6 +83,12 @@ class Renderer {
 
   /// 构建单个节点（不含 id 包裹）。_IdNode 定点重建时也走这里，避免重复包裹。
   static Widget? _buildNodeFor(dynamic spec, String path) {
+    // spec 可能是 JSON 字符串（如原生 patch 下发），先解码再构建。
+    if (spec is String) {
+      try {
+        spec = jsonDecode(spec);
+      } catch (_) {}
+    }
     if (spec is! Map) return _buildInner(spec, path);
     final p = Props.of(spec);
     return _buildNode(p, path, _children(p['children'] ?? p['child'], path));

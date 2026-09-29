@@ -216,7 +216,17 @@ public class FlutterLua {
             return false;
         }
         try {
-            node.put(key, value);
+            // 命令式属性名大小写不敏感：若节点已有同名键（如 text），复用它而不是新增一个 Text 键，
+            // 否则会与已有键并存，渲染时精确匹配会命中旧值。
+            String target = key;
+            for (Iterator<String> it = node.keys(); it.hasNext(); ) {
+                String k = it.next();
+                if (k.equalsIgnoreCase(key)) {
+                    target = k;
+                    break;
+                }
+            }
+            node.put(target, value);
         } catch (Exception e) {
             Log.w(TAG, "patchNode 写入失败: " + id + "." + key, e);
             return false;

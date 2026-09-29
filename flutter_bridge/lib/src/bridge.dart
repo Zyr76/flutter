@@ -102,10 +102,11 @@ class FlutterBridge {
         return null;
       case 'patch':
         // 命令式更新：只更新指定 id 节点，由 _IdNode 定点重建，不动全树。
+        // 原生传来的 spec 是 JSON 字符串，这里必须解码成结构，否则会被当纯文本渲染。
         final m = (call.arguments as Map).cast<String, dynamic>();
         final id = m['id']?.toString();
-        if (id != null) {
-          nodeSpecs[id]?.value = m['spec'];
+        if (id != null && nodeSpecs.containsKey(id)) {
+          nodeSpecs[id]!.value = decodeSpec(m['spec']);
         }
         return null;
       case 'call':
@@ -125,6 +126,18 @@ class FlutterBridge {
       default:
         throw MissingPluginException('未知方法 ${call.method}');
     }
+  }
+
+  /// 把原生传来的 spec（JSON 字符串）解码成 Dart 结构；已是结构则原样返回。
+  dynamic decodeSpec(dynamic raw) {
+    if (raw is String) {
+      try {
+        return jsonDecode(raw);
+      } catch (_) {
+        return raw;
+      }
+    }
+    return raw;
   }
 
   Map<String, dynamic>? decodeArgs(dynamic raw) {
