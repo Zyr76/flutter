@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -54,18 +55,28 @@ class Renderer {
   // 节点构建
   // ============================================================
 
-  /// 当前递归深度，用于防止 Lua 侧构造带环的 spec 导致栈溢出。
-  static int _depth = 0;
+  /// 嵌套深度上限。
+  ///
+  /// 深度从 path 推导（path 每往下钻一层就多一段），**不用静态计数器**：
+  /// 主树构建与 `_IdNode` 的定点重建可能在同一次构建中交错发生，
+  /// 共享计数器会互相污染、误报“嵌套过深”。从 path 推导天然可重入。
   static const int _maxDepth = 200;
 
-  static Widget? _build(dynamic spec, String path) {
-    if (_depth >= _maxDepth) {
-      return const Padding(
+  static int _depthOf(String path) {
+    var n = 0;
+    for (var i = 0; i < path.length; i++) {
+      if (path.codeUnitAt(i) == 0x2f) n++; // '/'
+    }
+    return n;
+  }
+
+  static Widget _tooDeep() => const Padding(
         padding: EdgeInsets.all(4),
         child: Text('⚠ 节点嵌套过深（可能存在环）', style: TextStyle(color: Colors.red, fontSize: 11)),
       );
-    }
-    _depth++;
+
+  static Widget? _build(dynamic spec, String path) {
+    if (_depthOf(path) >= _maxDepth) return _tooDeep();
     try {
       return _buildInner(spec, path);
     } catch (e) {
@@ -73,8 +84,6 @@ class Renderer {
         padding: const EdgeInsets.all(4),
         child: Text('⚠ 节点渲染失败: $e', style: const TextStyle(color: Colors.red, fontSize: 11)),
       );
-    } finally {
-      _depth--;
     }
   }
 
@@ -99,6 +108,9 @@ class Renderer {
 
   /// 构建单个节点（不含 id 包裹）。_IdNode 定点重建时也走这里，避免重复包裹。
   static Widget? _buildNodeFor(dynamic spec, String path) {
+    // 与 _build 同样做深度检查：_IdNode 的定点重建也不能绕过，
+    // 否则带环的 patch/notifier 更新仍会栈溢出。
+    if (_depthOf(path) >= _maxDepth) return _tooDeep();
     // spec 可能是 JSON 字符串（如原生 patch 下发），先解码再构建。
     if (spec is String) {
       try {
@@ -107,7 +119,14 @@ class Renderer {
     }
     if (spec is! Map) return _buildInner(spec, path);
     final p = Props.of(spec);
-    return _buildNode(p, path, _children(p['children'] ?? p['child'], path));
+    try {
+      return _buildNode(p, path, _children(p['children'] ?? p['child'], path));
+    } catch (e) {
+      return Padding(
+        padding: const EdgeInsets.all(4),
+        child: Text('⚠ 节点渲染失败: $e', style: const TextStyle(color: Colors.red, fontSize: 11)),
+      );
+    }
   }
 
   static Widget? _buildNode(Props p, String path, List<Widget> children) {
@@ -120,6 +139,19 @@ class Renderer {
         w = ext(p, children);
       } else if (ext is Widget Function(Map<String, dynamic>)) {
         w = ext(p.map);
+      } else {
+        // 兜底：返回可空的函数（如 Widget? Function(Props, List<Widget>)）或类型推断不明确的闭包，
+        // `is` 判断都不命中，这里用 Function.apply 动态调用。
+        try {
+          w = Function.apply(ext, [p, children]) as Widget?;
+        } catch (e) {
+          if (kDebugMode) debugPrint('Renderer: 自定义控件 $p.type 调用失败(新签名): $e');
+          try {
+            w = Function.apply(ext, [p.map]) as Widget?;
+          } catch (e2) {
+            if (kDebugMode) debugPrint('Renderer: 自定义控件 $p.type 调用失败(旧签名): $e2');
+          }
+        }
       }
       if (w != null) return _wrapCommon(w, p);
     }
@@ -251,7 +283,7 @@ class Renderer {
       case 'transform':
         final t = p['translate'];
         final off = t is List && t.length >= 2
-            ? Offset((t[0] as num).toDouble(), (t[1] as num).toDouble())
+            ? Offset(Props.toNum(t[0]) ?? 0, Props.toNum(t[1]) ?? 0)
             : Offset.zero;
         result = Transform.translate(offset: off, child: child0());
         break;
@@ -1546,7 +1578,7 @@ class Renderer {
 
     Widget body;
     switch (kind) {
-      case 'bar' || 'barchart':
+      case 'barchart':
         // 分组柱：groups = [ { values: [1,2], colors: ['#f00','#0f0'] }, ... ]；
         // 不传 groups 时沿用 series（一个 x 一根柱）。
         final groups = p.list('groups');
@@ -1571,7 +1603,7 @@ class Renderer {
           borderData: FlBorderData(show: false),
         ));
         break;
-      case 'pie' || 'piechart':
+      case 'piechart':
         body = PieChart(PieChartData(
           sections: [
             for (final s in series)
@@ -1579,7 +1611,7 @@ class Renderer {
           ],
         ));
         break;
-      default:
+      case 'linechart':
         body = LineChart(LineChartData(
           lineBarsData: [
             for (final s in series)
@@ -1594,6 +1626,15 @@ class Renderer {
           gridData: const FlGridData(show: true),
           borderData: FlBorderData(show: false),
         ));
+        break;
+      default:
+        // 将来加 AreaChart/ScatterChart 等时，未知类型明确占位，而不是悄悄渲染成 LineChart
+        body = Center(
+          child: Text(
+            '⚠ 未知图表类型: ${p.type}',
+            style: const TextStyle(color: Colors.red, fontSize: 11),
+          ),
+        );
     }
     // height 未传时不包 SizedBox，交给外层约束（旧实现硬编码 220 会无视外层高度）
     return height == null ? body : SizedBox(height: height, child: body);
@@ -1618,10 +1659,21 @@ class Renderer {
     if (names.isNotEmpty) {
       final rods = <BarChartRodData>[];
       for (final n in names) {
-        final s = series.firstWhere(
-          (e) => e.name == n.toString(),
-          orElse: () => _Series(null, Colors.blue, 0, const []),
-        );
+        final idx = series.indexWhere((e) => e.name == n.toString());
+        if (idx < 0) {
+          // 名字对不上时柱高为 0，很容易被当成“值为 0”，debug 下明确提示
+          if (kDebugMode) {
+            debugPrint('Renderer: BarChart groups.series 里找不到名为 "$n" 的 series，该柱按 0 处理');
+          }
+          rods.add(BarChartRodData(
+            toY: 0,
+            color: Colors.grey,
+            width: gp.n('barWidth') ?? 12,
+            borderRadius: BorderRadius.circular(4),
+          ));
+          continue;
+        }
+        final s = series[idx];
         rods.add(BarChartRodData(
           toY: s.value,
           color: s.color,
@@ -1664,14 +1716,15 @@ class Renderer {
       final t = p.s('tooltip');
       if (t != null && t.isNotEmpty) out = Tooltip(message: t, child: out);
     }
-    final weight = p.n('weight');
-    if (weight != null) {
-      out = Expanded(flex: weight.round(), child: out);
-    }
     final w = p['width'];
     final h = p['height'];
     if (w != null || h != null) {
       out = SizedBox(width: Props.dim(w), height: Props.dim(h), child: out);
+    }
+    // Expanded 必须在外层：SizedBox(child: Expanded) 里父约束不是 Flex，Expanded 会失效
+    final weight = p.n('weight');
+    if (weight != null) {
+      out = Expanded(flex: weight.round(), child: out);
     }
     return out;
   }
@@ -1679,7 +1732,15 @@ class Renderer {
   // 下列控件自己会处理对应属性，_wrapCommon 跳过，避免重复包装。
   static const Set<String> _noVisibilityWrap = {'visibility', 'offstage'};
   static const Set<String> _noOpacityWrap = {'opacity', 'animatedopacity', 'animatedcrossfade'};
-  static const Set<String> _noMarginWrap = {'container', 'card', 'padding', 'animatedcontainer'};
+  static const Set<String> _noMarginWrap = {
+    'container', 'card', 'padding', 'animatedcontainer',
+    // 以下控件自带边距/占满宽度的语义，重复包 margin 会改变布局
+    'listtile', 'switchlisttile', 'checkboxlisttile', 'radiolisttile', 'expansiontile',
+    'appbar', 'sliverappbar', 'bottomappbar',
+    'bottomnavigationbar', 'navigationbar', 'navigationrail', 'tabbar',
+    'divider', 'verticaldivider',
+    'dialog', 'alertdialog', 'simpledialog', 'bottomsheet',
+  };
   static const Set<String> _noTooltipWrap = {
     'tooltip', 'iconbutton', 'floatingactionbutton', 'chip',
     'actionchip', 'filterchip', 'choicechip', 'inputchip', 'materialbutton',
@@ -1708,7 +1769,8 @@ class Renderer {
       return out;
     }
     if (raw is Map) {
-      final one = _build(raw, path);
+      // 单子节点也要延长 path：否则这一层不算嵌套，深度检查会失效（且 key 会和父节点重合）
+      final one = _build(raw, '$path/c');
       return one == null ? [] : [one];
     }
     return [];
@@ -1844,6 +1906,10 @@ class Renderer {
   }
 
   /// InputDecoration 的边框：字符串（outline/underline/none）或 {type, radius, color, width, side}。
+  ///
+  /// 默认圆角不一致是 Flutter 自己的默认行为，不是笔误：
+  /// UnderlineInputBorder 默认只在上方两个角倒 4（topLeft/topRight），
+  /// OutlineInputBorder 默认四角都倒 4；传 radius 时两者都按传入值走。
   static InputBorder? _inputBorder(Props p, String key) {
     final v = p[key];
     if (v == null) return null;
@@ -1922,7 +1988,7 @@ class Renderer {
 
   static Offset? _offset(dynamic v) {
     if (v is List && v.length >= 2) {
-      return Offset((v[0] as num).toDouble(), (v[1] as num).toDouble());
+      return Offset(Props.toNum(v[0]) ?? 0, Props.toNum(v[1]) ?? 0);
     }
     return null;
   }

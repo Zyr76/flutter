@@ -11,17 +11,20 @@ import "android.view.*"
 activity.setTitle("AndroLua + Flutter")
 
 -- 1) 原生布局：中间留一个 FrameLayout 给 FlutterView
+--   注意：这里是【原生 loadlayout】布局，控件必须用 Android 类名（Button=android.widget.Button）；
+--        Flutter 控件名（如 ElevatedButton）只在下面的 flutterRender spec 里用。
 local layout = {
   LinearLayout,
   orientation = "vertical",
   { TextView, id = "hint", text = "↑ 原生 TextView：由 loadlayout 创建" },
   { FrameLayout, id = "flutterHost", layout_width = "fill", layout_height = 0, layout_weight = 1 },
-  { ElevatedButton, id = "nativeBtn", text = "native Button：dartCall('getUserInfo')" },
+  { Button, id = "nativeBtn", text = "native Button：dartCall('getUserInfo')" },
 }
 activity.setContentView(loadlayout(layout))
 hint.setPadding(24, 24, 24, 24)
 
 -- 2) Flutter 区：widget 描述写成 Lua 表，Java 侧转 JSON 交给 Dart 渲染
+--    这里必须用 Flutter 自己的控件名（ElevatedButton / Column / Text ...）
 local spec = {
   type = "Column",
   gap = 10,
@@ -30,7 +33,7 @@ local spec = {
     { type = "Text", text = "↓ 以下是 Flutter 自绘 UI", fontSize = 13, color = "#888888" },
     { type = "Text", text = "Flutter 自绘 Text", fontSize = 24, fontWeight = "bold", color = "#3F51B5" },
     {
-      type = "Button",
+      type = "ElevatedButton",
       text = "Flutter Button：调 Dart add(3,4)",
       onTap = { call = "add", args = { a = 3, b = 4 } },
     },

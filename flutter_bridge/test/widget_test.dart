@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:flutter_bridge/src/bridge.dart';
+import 'package:flutter_bridge/src/props.dart';
 import 'package:flutter_bridge/src/renderer.dart';
 
 void main() {
@@ -517,6 +518,53 @@ void main() {
       '2': {'1': 'Button', 'text': 'x'},
     }));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('P0-1/P0-2：嵌套过深时返回占位而不是栈溢出', (tester) async {
+    dynamic node = {'1': 'Text', 'text': 'deep'};
+    for (var i = 0; i < 220; i++) {
+      node = {'1': 'Container', 'child': node};
+    }
+    final w = Renderer.build(jsonEncode(node));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.textContaining('嵌套过深'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('P0-1：正常深度的树不受深度检查影响', (tester) async {
+    dynamic node = {'1': 'Text', 'text': 'bottom'};
+    for (var i = 0; i < 30; i++) {
+      node = {'1': 'Container', 'child': node};
+    }
+    final w = Renderer.build(jsonEncode(node));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('bottom'), findsOneWidget);
+  });
+
+  testWidgets('P1-1：custom 注册“可空返回”签名也能调用', (tester) async {
+    Renderer.register('mycustom1', (Props p, List<Widget> children) => children.isEmpty ? null : children.first);
+    final w = Renderer.build(jsonEncode({
+      '1': 'MyCustom1',
+      'children': [
+        {'1': 'Text', 'text': 'cus'},
+      ],
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('cus'), findsOneWidget);
+    Renderer.custom.remove('mycustom1');
+  });
+
+  testWidgets('P1-2：weight 与 width 同时使用时 Expanded 在外层', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Row',
+      'children': [
+        {'1': 'Container', 'weight': 1, 'width': 50, 'height': 10},
+        {'1': 'Text', 'text': 'x'},
+      ],
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byType(Expanded), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
