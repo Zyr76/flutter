@@ -206,6 +206,16 @@ public class FlutterLua {
         }
     }
 
+    /** 通用：向 Dart 发一个带参数的方法调用（弹窗类命令等）。 */
+    public void invoke(final String method, final Object args) {
+        runOnMain(new Runnable() {
+            @Override
+            public void run() {
+                channel.invokeMethod(method, args);
+            }
+        });
+    }
+
     /**
      * 命令式改某个 id 节点的属性，并把该节点新 spec 下发给 Dart 定点重建。
      * 返回是否找到了该 id（未找到则不生效）。

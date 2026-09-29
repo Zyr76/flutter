@@ -17,6 +17,8 @@ class FlutterBridgeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      // 弹窗类命令需要 Navigator：交给 FlutterBridge 持有，原生可直接调 showDialog 等。
+      navigatorKey: FlutterBridge.instance.navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: const Color(0xFF3F51B5), useMaterial3: true),
       home: const BridgeRoot(),

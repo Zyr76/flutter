@@ -294,6 +294,162 @@ class Props {
     }
   }
 
+  static Duration toDuration(dynamic v) => Duration(milliseconds: toNum(v)?.round() ?? 0);
+
+  static Curve toCurve(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'ease': return Curves.ease;
+      case 'easein': return Curves.easeIn;
+      case 'easeout': return Curves.easeOut;
+      case 'easeinout': return Curves.easeInOut;
+      case 'linear': return Curves.linear;
+      case 'bouncein': return Curves.bounceIn;
+      case 'bounceout': return Curves.bounceOut;
+      case 'elasticin': return Curves.elasticIn;
+      case 'elasticout': return Curves.elasticOut;
+      case 'fastoutslowin': return Curves.fastOutSlowIn;
+      case 'decelerate': return Curves.decelerate;
+      default: return Curves.easeInOut;
+    }
+  }
+
+  static TextInputAction? toInputAction(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'done': return TextInputAction.done;
+      case 'go': return TextInputAction.go;
+      case 'next': return TextInputAction.next;
+      case 'previous': return TextInputAction.previous;
+      case 'search': return TextInputAction.search;
+      case 'send': return TextInputAction.send;
+      case 'none': return TextInputAction.none;
+      case 'newline': return TextInputAction.newline;
+      default: return null;
+    }
+  }
+
+  static TextCapitalization toTextCapitalization(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'words': return TextCapitalization.words;
+      case 'sentences': return TextCapitalization.sentences;
+      case 'characters': return TextCapitalization.characters;
+      default: return TextCapitalization.none;
+    }
+  }
+
+  static BoxShape toBoxShape(dynamic v) =>
+      v?.toString().toLowerCase() == 'circle' ? BoxShape.circle : BoxShape.rectangle;
+
+  static BorderRadius? toBorderRadius(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return BorderRadius.circular(v.toDouble());
+    if (v is List) {
+      final n = v.map(toNum).whereType<double>().toList();
+      if (n.length == 1) return BorderRadius.circular(n[0]);
+      if (n.length == 4) {
+        return BorderRadius.only(
+          topLeft: Radius.circular(n[0]),
+          topRight: Radius.circular(n[1]),
+          bottomRight: Radius.circular(n[2]),
+          bottomLeft: Radius.circular(n[3]),
+        );
+      }
+    }
+    return null;
+  }
+
+  static BorderStyle toBorderStyle(dynamic v) =>
+      v?.toString().toLowerCase() == 'none' ? BorderStyle.none : BorderStyle.solid;
+
+  /// 形状：circle / stadium / beveled / rounded（默认）；radius 作为 rounded 的圆角。
+  static OutlinedBorder? toShape(dynamic v, [double? radius]) {
+    switch (v?.toString().toLowerCase()) {
+      case 'circle': return const CircleBorder();
+      case 'stadium':
+      case 'pill': return const StadiumBorder();
+      case 'beveled': return BeveledRectangleBorder(borderRadius: BorderRadius.circular(radius ?? 0));
+      case 'rounded': return RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius ?? 4));
+      default: return null;
+    }
+  }
+
+  static ImageRepeat toImageRepeat(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'repeat': return ImageRepeat.repeat;
+      case 'repeatx': return ImageRepeat.repeatX;
+      case 'repeaty': return ImageRepeat.repeatY;
+      default: return ImageRepeat.noRepeat;
+    }
+  }
+
+  static FilterQuality toFilterQuality(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'none': return FilterQuality.none;
+      case 'low': return FilterQuality.low;
+      case 'medium': return FilterQuality.medium;
+      default: return FilterQuality.high;
+    }
+  }
+
+  static StackFit toStackFit(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'expand': return StackFit.expand;
+      case 'passthrough': return StackFit.passthrough;
+      default: return StackFit.loose;
+    }
+  }
+
+  static TextWidthBasis toTextWidthBasis(dynamic v) =>
+      v?.toString().toLowerCase() == 'longestline' ? TextWidthBasis.longestLine : TextWidthBasis.parent;
+
+  static BlendMode? toBlendMode(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'multiply': return BlendMode.multiply;
+      case 'screen': return BlendMode.screen;
+      case 'overlay': return BlendMode.overlay;
+      case 'darken': return BlendMode.darken;
+      case 'lighten': return BlendMode.lighten;
+      case 'colorburn': return BlendMode.colorBurn;
+      case 'colordodge': return BlendMode.colorDodge;
+      case 'srcatop': return BlendMode.srcATop;
+      case 'srcin': return BlendMode.srcIn;
+      case 'dstin': return BlendMode.dstIn;
+      case 'dstover': return BlendMode.dstOver;
+      case 'xor': return BlendMode.xor;
+      default: return null;
+    }
+  }
+
+  /// 支持 linear / radial / sweep 三种渐变（type 字段区分，默认 linear）。
+  static Gradient? toAnyGradient(dynamic v) {
+    if (v is! Map) return null;
+    final m = v.cast<String, dynamic>();
+    final colors = toList(m['colors']).map(toColor).whereType<Color>().toList();
+    if (colors.isEmpty) return null;
+    final stops = toList(m['stops']).map(toNum).whereType<double>().toList();
+    final type = (m['type'] ?? 'linear').toString().toLowerCase();
+    if (type == 'radial') {
+      return RadialGradient(
+        colors: colors,
+        stops: stops.isEmpty ? null : stops,
+        center: toAlignment(m['center']) ?? Alignment.center,
+        radius: toNum(m['radius']) ?? 0.5,
+      );
+    }
+    if (type == 'sweep') {
+      return SweepGradient(
+        colors: colors,
+        stops: stops.isEmpty ? null : stops,
+        center: toAlignment(m['center']) ?? Alignment.center,
+      );
+    }
+    return LinearGradient(
+      colors: colors,
+      stops: stops.isEmpty ? null : stops,
+      begin: toAlignment(m['begin']) ?? Alignment.topLeft,
+      end: toAlignment(m['end']) ?? Alignment.bottomRight,
+    );
+  }
+
   static Gradient? toGradient(dynamic v) {
     if (v is! Map) return null;
     final m = v.cast<String, dynamic>();
@@ -370,9 +526,26 @@ class Props {
       fontWeight: fw,
       fontStyle: p.s('fontStyle')?.toLowerCase() == 'italic' ? FontStyle.italic : null,
       decoration: toTextDecoration(p['decoration']),
+      decorationColor: p.color('decorationColor'),
+      decorationStyle: _decorationStyle(p['decorationStyle']),
+      fontFamily: p.s('fontFamily'),
+      shadows: toShadows(p['shadow'] ?? p['shadows']),
+      backgroundColor: p.color('textBackgroundColor'),
+      wordSpacing: p.n('wordSpacing'),
       letterSpacing: p.n('letterSpacing'),
       height: p.n('lineHeight') ?? p.n('height'),
     );
+  }
+
+  static TextDecorationStyle? _decorationStyle(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'dashed': return TextDecorationStyle.dashed;
+      case 'dotted': return TextDecorationStyle.dotted;
+      case 'double': return TextDecorationStyle.double;
+      case 'wavy': return TextDecorationStyle.wavy;
+      case 'solid': return TextDecorationStyle.solid;
+      default: return null;
+    }
   }
 
   static TextDecoration? toTextDecoration(dynamic v) {

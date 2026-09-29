@@ -363,7 +363,13 @@ public final class LuaJson {
                 "Dismissible", "NavigationBar", "BottomAppBar", "Form", "VerticalDivider",
                 "RichText", "CupertinoActivityIndicator",
                 "AnimatedAlign", "AnimatedPadding", "AnimatedScale", "AnimatedRotation",
-                "AnimatedSlide", "AnimatedSwitcher", "AnimatedDefaultTextStyle", "AnimatedCrossFade"
+                "AnimatedSlide", "AnimatedSwitcher", "AnimatedDefaultTextStyle", "AnimatedCrossFade",
+                "AnimatedPositioned", "AnimatedSize", "AnimatedTheme",
+                // 弹窗 / 复杂控件 / Sliver
+                "AlertDialog", "SimpleDialog", "Dialog", "BottomSheet", "SnackBar", "TextFormField",
+                "PageView", "NavigationRail", "DropdownMenu", "ReorderableListView","ExpansionPanelList",
+                "Table", "CustomScrollView", "SliverToBoxAdapter", "SliverPadding", "SliverList",
+                "SliverGrid", "SliverFillRemaining", "SliverAppBar"
         };
         for (String n : names) {
             TYPES.put(n, n);

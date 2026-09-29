@@ -1,9 +1,10 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'logic.dart';
+import 'renderer.dart';
 
 /// Dart 与 Android 原生壳之间的桥。
 ///
@@ -25,6 +26,9 @@ class FlutterBridge {
 
   /// 当前渲染的 widget 树描述（JSON 字符串），由原生 `render` 写入。
   final ValueNotifier<String?> spec = ValueNotifier<String?>(null);
+
+  /// 弹窗类命令（dialog/bottomSheet/snackBar/datePicker/timePicker）用的导航 key。
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   /// 每个带 id 节点的当前 spec，供命令式更新（patch）或全量 render 时定点重建。
   final Map<String, ValueNotifier<dynamic>> nodeSpecs = {};
@@ -109,6 +113,99 @@ class FlutterBridge {
           nodeSpecs[id]!.value = decodeSpec(m['spec']);
         }
         return null;
+      case 'dialog':
+        {
+          final ctx = navigatorKey.currentContext;
+          if (ctx == null) return null;
+          await showDialog<dynamic>(
+            context: ctx,
+            barrierDismissible: true,
+            builder: (_) => Renderer.build(decodeSpec(call.arguments)),
+          );
+          emit('dialogClosed');
+          return null;
+        }
+      case 'bottomSheet':
+        {
+          final ctx = navigatorKey.currentContext;
+          if (ctx == null) return null;
+          await showModalBottomSheet<dynamic>(
+            context: ctx,
+            builder: (_) => Renderer.build(decodeSpec(call.arguments)),
+          );
+          emit('bottomSheetClosed');
+          return null;
+        }
+      case 'snackBar':
+        {
+          final ctx = navigatorKey.currentContext;
+          if (ctx == null) return null;
+          final a = decodeArgs(call.arguments);
+          final text = (a?['text'] ?? a?['message'] ?? '').toString();
+          final messenger = ScaffoldMessenger.maybeOf(ctx);
+          messenger?.showSnackBar(
+            SnackBar(
+              content: Text(text),
+              duration: Duration(milliseconds: (a?['duration'] as num?)?.toInt() ?? 3000),
+              backgroundColor: a?['backgroundColor'] != null
+                  ? _parseColor(a?['backgroundColor'])
+                  : null,
+              behavior: a?['behavior']?.toString().toLowerCase() == 'floating'
+                  ? SnackBarBehavior.floating
+                  : SnackBarBehavior.fixed,
+              action: a?['actionLabel'] != null
+                  ? SnackBarAction(label: (a?['actionLabel'] ?? '').toString(), onPressed: () => emit('snackBarAction'))
+                  : null,
+            ),
+          );
+          return null;
+        }
+      case 'closeDialog':
+        navigatorKey.currentState?.maybePop();
+        return null;
+      case 'datePicker':
+        {
+          final ctx = navigatorKey.currentContext;
+          if (ctx == null) return null;
+          final a = decodeArgs(call.arguments);
+          final now = DateTime.now();
+          DateTime parse(dynamic v, DateTime def) {
+            if (v == null) return def;
+            if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+            return DateTime.tryParse(v.toString()) ?? def;
+          }
+
+          final first = parse(a?['firstDate'], DateTime(now.year - 1, now.month, now.day));
+          final last = parse(a?['lastDate'], DateTime(now.year + 1, now.month, now.day));
+          var initial = parse(a?['initialDate'], now);
+          if (initial.isBefore(first)) initial = first;
+          if (initial.isAfter(last)) initial = last;
+          final picked = await showDatePicker(
+            context: ctx,
+            initialDate: initial,
+            firstDate: first,
+            lastDate: last,
+          );
+          emit('datePicked', {'ok': picked != null, 'value': picked?.toIso8601String(), 'year': picked?.year, 'month': picked?.month, 'day': picked?.day});
+          return null;
+        }
+      case 'timePicker':
+        {
+          final ctx = navigatorKey.currentContext;
+          if (ctx == null) return null;
+          final a = decodeArgs(call.arguments);
+          final picked = await showTimePicker(
+            context: ctx,
+            initialTime: a?['hour'] != null
+                ? TimeOfDay(
+                    hour: ((a?['hour'] as num?) ?? 0).toInt(),
+                    minute: ((a?['minute'] as num?) ?? 0).toInt(),
+                  )
+                : TimeOfDay.now(),
+          );
+          emit('timePicked', {'ok': picked != null, 'hour': picked?.hour, 'minute': picked?.minute});
+          return null;
+        }
       case 'call':
         final args = (call.arguments as List).cast<dynamic>();
         final name = args[0] as String;
@@ -138,6 +235,15 @@ class FlutterBridge {
       }
     }
     return raw;
+  }
+
+  static Color? _parseColor(dynamic v) {
+    if (v is int) return Color(v);
+    if (v is! String) return null;
+    var hex = v.toLowerCase().replaceFirst('#', '').replaceFirst('0x', '');
+    if (hex.length == 6) hex = 'ff$hex';
+    final i = int.tryParse(hex, radix: 16);
+    return i == null ? null : Color(i);
   }
 
   Map<String, dynamic>? decodeArgs(dynamic raw) {

@@ -401,4 +401,77 @@ void main() {
     expect(find.text('你好'), findsOneWidget);
     expect(find.textContaining('"1"'), findsNothing);
   });
+
+  testWidgets('弹窗/复杂/动画控件批量渲染', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'SingleChildScrollView',
+      'child': {
+        '1': 'Column',
+        'gap': 8,
+        'children': [
+          {
+            '1': 'AlertDialog',
+            'title': {'1': 'Text', 'text': '标题D'},
+            'content': {'1': 'Text', 'text': '内容D'},
+            'actions': [
+              {'1': 'TextButton', 'text': 'OK'},
+            ],
+          },
+          {'1': 'SimpleDialog', 'title': {'1': 'Text', 'text': 'SD'}, 'children': [
+            {'1': 'Text', 'text': 'sd1'},
+          ]},
+          {'1': 'Dialog', 'child': {'1': 'Text', 'text': 'D'}},
+          {'1': 'BottomSheet', 'children': [{'1': 'Text', 'text': 'BS'}]},
+          {'1': 'SizedBox', 'height': 200, 'child': {
+            '1': 'PageView',
+            'children': [
+              {'1': 'Center', 'child': {'1': 'Text', 'text': 'P1'}},
+              {'1': 'Center', 'child': {'1': 'Text', 'text': 'P2'}},
+            ],
+          }},
+          {'1': 'SizedBox', 'height': 300, 'child': {
+            '1': 'NavigationRail',
+            'items': [
+              {'icon': 'home', 'label': 'H'},
+              {'icon': 'person', 'label': 'P'},
+            ],
+          }},
+          {'1': 'DropdownMenu', 'items': [
+            {'value': 'a', 'label': 'A'},
+            {'value': 'b', 'label': 'B'},
+          ]},
+          {'1': 'Table', 'border': true, 'rows': [
+            ['a', 'b'],
+            ['c', 'd'],
+          ]},
+          {'1': 'ExpansionPanelList', 'panels': [
+            {'header': '头', 'body': {'1': 'Text', 'text': '体'}},
+          ]},
+          {'1': 'SizedBox', 'height': 200, 'child': {
+            '1': 'Stack',
+            'children': [
+              {'1': 'AnimatedPositioned', 'left': 10, 'top': 10, 'child': {'1': 'Text', 'text': 'AP'}},
+              {'1': 'AnimatedSize', 'child': {'1': 'Text', 'text': 'AS'}},
+            ],
+          }},
+          {'1': 'SizedBox', 'height': 200, 'child': {
+            '1': 'CustomScrollView',
+            'slivers': [
+              {'1': 'SliverToBoxAdapter', 'child': {'1': 'Text', 'text': 'S1'}},
+              {'1': 'SliverList', 'children': [
+                {'1': 'Text', 'text': 'S2'},
+              ]},
+            ],
+          }},
+        ],
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('内容D'), findsOneWidget);
+    expect(find.byType(PageView), findsOneWidget);
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(Table), findsOneWidget);
+    expect(find.byType(AnimatedPositioned), findsOneWidget);
+    expect(find.byType(CustomScrollView, skipOffstage: false), findsOneWidget);
+  });
 }

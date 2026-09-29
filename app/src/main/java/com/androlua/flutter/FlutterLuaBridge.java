@@ -16,6 +16,7 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -69,7 +70,11 @@ public final class FlutterLuaBridge {
                 FlutterLua flutter = flutter(context);
                 String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
                 try {
-                    flutter.setSpec(new JSONObject(json));
+                    JSONObject root = new JSONObject(json);
+                    // 图片 src 支持只写文件名（如 123.png）→ 拼成项目目录下的绝对路径
+                    resolveImagePaths(root, context.getLuaDir());
+                    json = root.toString();
+                    flutter.setSpec(root);
                 } catch (Exception e) {
                     logError("解析 spec 失败，命令式 h.X=值 暂不可用", e);
                 }
@@ -211,6 +216,9 @@ public final class FlutterLuaBridge {
                 } catch (Exception e) {
                     value = L.isNoneOrNil(4) ? null : L.toString(4);
                 }
+                if ("src".equalsIgnoreCase(key) && value instanceof String && isRelativeImagePath((String) value)) {
+                    value = context.getLuaDir() + "/" + value;
+                }
                 if (!f.patchNode(id, key, value)) {
                     warn(L, "未找到 id=\"" + id + "\" 的节点，无法设置 " + key);
                 }
@@ -218,6 +226,111 @@ public final class FlutterLuaBridge {
             }
         };
         reg(apply, "__flutter_apply");
+
+        // ---- 弹窗类命令 ----
+        JavaFunction showDialog = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = flutter(context);
+                String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
+                f.invoke("dialog", json);
+                return 0;
+            }
+        };
+        reg(showDialog, "flutterShowDialog", "显示对话框");
+
+        JavaFunction showSheet = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = flutter(context);
+                String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
+                f.invoke("bottomSheet", json);
+                return 0;
+            }
+        };
+        reg(showSheet, "flutterShowBottomSheet", "显示底部弹窗");
+
+        JavaFunction showSnack = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = flutter(context);
+                String json;
+                if (L.isString(2)) {
+                    json = "{\"text\":" + quote(L.toString(2)) + "}";
+                } else if (L.type(2) == LuaState.LUA_TTABLE) {
+                    json = LuaJson.encode(L, 2);
+                } else {
+                    json = "{\"text\":\"\"}";
+                }
+                f.invoke("snackBar", json);
+                return 0;
+            }
+        };
+        reg(showSnack, "flutterShowSnackBar", "显示提示", "flutterSnackBar");
+
+        JavaFunction datePicker = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = flutter(context);
+                String json = L.isNoneOrNil(2) ? "null" : LuaJson.encode(L, 2);
+                f.invoke("datePicker", json);
+                return 0;
+            }
+        };
+        reg(datePicker, "flutterDatePicker", "选择日期");
+
+        JavaFunction timePicker = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = flutter(context);
+                String json = L.isNoneOrNil(2) ? "null" : LuaJson.encode(L, 2);
+                f.invoke("timePicker", json);
+                return 0;
+            }
+        };
+        reg(timePicker, "flutterTimePicker", "选择时间");
+
+        JavaFunction closeDialog = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = flutter(context);
+                f.invoke("closeDialog", null);
+                return 0;
+            }
+        };
+        reg(closeDialog, "flutterCloseDialog", "关闭对话框");
+    }
+
+    /** src 是否是需要拼成绝对路径的“纯文件名/相对路径”。 */
+    private static boolean isRelativeImagePath(String s) {
+        if (s == null || s.isEmpty()) return false;
+        String low = s.toLowerCase();
+        return !(low.startsWith("http://") || low.startsWith("https://") || low.startsWith("data:")
+                || low.startsWith("file://") || low.startsWith("/") || low.startsWith("storage/")
+                || low.startsWith("assets/") || low.startsWith("asset:") || low.contains("://"));
+    }
+
+    /** 递归把所有 src 的相对路径拼成项目目录下的绝对路径。 */
+    private static void resolveImagePaths(Object node, String luaDir) {
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            Object src = o.opt("src");
+            if (src instanceof String && isRelativeImagePath((String) src)) {
+                try {
+                    o.put("src", luaDir + "/" + src);
+                } catch (Exception e) {
+                    logError("拼图片路径失败: " + src, e);
+                }
+            }
+            for (Iterator<String> it = o.keys(); it.hasNext(); ) {
+                resolveImagePaths(o.opt(it.next()), luaDir);
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length(); i++) {
+                resolveImagePaths(a.opt(i), luaDir);
+            }
+        }
     }
 
     /**

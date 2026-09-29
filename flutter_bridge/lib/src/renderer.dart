@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:just_audio/just_audio.dart';
@@ -112,7 +113,8 @@ class Renderer {
           mainAxisSize: Props.toMainAxisSize(p['mainAxisSize']),
           textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
           verticalDirection: p.has('verticalDirection') ? Props.toVerticalDirection(p['verticalDirection']) : VerticalDirection.down,
-          spacing: p.nz('gap'),
+          textBaseline: p.has('textBaseline') ? TextBaseline.alphabetic : null,
+          spacing: p.n('spacing') ?? p.nz('gap'),
           children: children,
         );
         break;
@@ -123,14 +125,15 @@ class Renderer {
           mainAxisSize: Props.toMainAxisSize(p['mainAxisSize']),
           textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
           verticalDirection: p.has('verticalDirection') ? Props.toVerticalDirection(p['verticalDirection']) : VerticalDirection.down,
-          spacing: p.nz('gap'),
+          textBaseline: p.has('textBaseline') ? TextBaseline.alphabetic : null,
+          spacing: p.n('spacing') ?? p.nz('gap'),
           children: children,
         );
         break;
       case 'stack':
         result = Stack(
           alignment: p.align('alignment') ?? AlignmentDirectional.topStart,
-          fit: p.s('fit')?.toLowerCase() == 'expand' ? StackFit.expand : StackFit.loose,
+          fit: p.has('fit') ? Props.toStackFit(p['fit']) : StackFit.loose,
           clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : (p.b('clip') ? Clip.antiAlias : Clip.hardEdge),
           children: children,
         );
@@ -142,9 +145,12 @@ class Renderer {
           alignment: p.align('alignment'),
           padding: p.inset('padding'),
           margin: p.inset('margin'),
+          color: p.has('decoration') ? null : p.color('color'),
           decoration: _decoration(p),
           foregroundDecoration: p['foregroundDecoration'] != null ? _decoration(Props.of(p['foregroundDecoration'])) : null,
           constraints: (p.has('minWidth') || p.has('maxWidth') || p.has('minHeight') || p.has('maxHeight')) ? _constraints(p) : null,
+          transform: _matrix4(p['transform']),
+          transformAlignment: p.align('transformAlignment'),
           clipBehavior: p.b('clip') ? Clip.antiAlias : Clip.none,
           child: child0(),
         );
@@ -232,23 +238,47 @@ class Renderer {
       // ---------- 文本 / 图片 / 图标 ----------
       case 'text':
         result = Text(
-          (p['text'] ?? p['value'] ?? '').toString(),
-          textAlign: Props.toTextAlign(p['textAlign']),
+          (p['text'] ?? p['value'] ?? p['data'] ?? '').toString(),
           style: Props.toTextStyle(p),
-          maxLines: p.i('maxLines'),
+          textAlign: p.has('textAlign') ? Props.toTextAlign(p['textAlign']) : null,
+          textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
           softWrap: p.has('softWrap') ? p.b('softWrap', true) : null,
           overflow: Props.toOverflow(p['overflow']) ?? (p.i('maxLines') != null ? TextOverflow.ellipsis : null),
+          textScaler: p.n('textScaleFactor') != null || p.n('textScaler') != null
+              ? TextScaler.linear(p.n('textScaleFactor') ?? p.n('textScaler')!)
+              : null,
+          maxLines: p.i('maxLines'),
+          semanticsLabel: p.s('semanticsLabel'),
+          textWidthBasis: p.has('textWidthBasis') ? Props.toTextWidthBasis(p['textWidthBasis']) : null,
+          selectionColor: p.color('selectionColor'),
         );
         break;
       case 'selectabletext':
         result = SelectableText(
           (p['text'] ?? p['value'] ?? '').toString(),
-          textAlign: Props.toTextAlign(p['textAlign']),
           style: Props.toTextStyle(p),
+          textAlign: p.has('textAlign') ? Props.toTextAlign(p['textAlign']) : null,
+          maxLines: p.i('maxLines'),
+          autofocus: p.b('autofocus'),
+          showCursor: p.b('showCursor', true),
+          cursorColor: p.color('cursorColor'),
+          selectionColor: p.color('selectionColor'),
+          textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
         );
         break;
       case 'icon':
-        result = Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color'), size: p.n('size'));
+        result = Icon(
+          Props.toIcon(p['icon'] ?? p['name']),
+          color: p.color('color'),
+          size: p.n('size') ?? p.n('iconSize'),
+          fill: p.n('fill'),
+          weight: p.n('weight'),
+          grade: p.n('grade'),
+          opticalSize: p.n('opticalSize'),
+          semanticLabel: p.s('semanticsLabel'),
+          textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
+          shadows: Props.toShadows(p['shadows']),
+        );
         break;
       case 'image':
         result = _imageWidget(p);
@@ -278,16 +308,36 @@ class Renderer {
         break;
       case 'iconbutton':
         result = IconButton(
-          icon: Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color'), size: p.n('iconSize') ?? p.n('size')),
+          icon: children.isNotEmpty
+              ? child0()
+              : Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('iconColor')),
+          iconSize: p.n('iconSize') ?? p.n('size'),
+          color: p.color('color'),
+          disabledColor: p.color('disabledColor'),
           tooltip: p.s('tooltip'),
+          splashRadius: p.n('splashRadius'),
+          padding: p.inset('padding'),
+          alignment: p.align('alignment') ?? Alignment.center,
+          autofocus: p.b('autofocus'),
+          enableFeedback: p.b('enableFeedback', true),
           onPressed: p.b('enabled', true) ? _tapHandler(p) : null,
         );
         break;
       case 'floatingactionbutton':
         result = FloatingActionButton(
-          onPressed: _tapHandler(p),
+          onPressed: p.b('enabled', true) ? _tapHandler(p) : null,
           backgroundColor: p.color('color') ?? p.color('backgroundColor'),
-          child: Icon(Props.toIcon(p['icon'] ?? p['name'])),
+          foregroundColor: p.color('foregroundColor'),
+          elevation: p.n('elevation'),
+          highlightElevation: p.n('highlightElevation'),
+          focusColor: p.color('focusColor'),
+          hoverColor: p.color('hoverColor'),
+          splashColor: p.color('splashColor'),
+          mini: p.b('mini'),
+          tooltip: p.s('tooltip'),
+          heroTag: p['heroTag']?.toString(),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          child: children.isNotEmpty ? child0() : Icon(Props.toIcon(p['icon'] ?? p['name'])),
         );
         break;
 
@@ -295,12 +345,13 @@ class Renderer {
       case 'card':
         result = Card(
           elevation: p.n('elevation') ?? 1,
-          color: p.color('color') ?? _decoration(p)?.color,
+          color: p.color('color') ?? p.color('backgroundColor') ?? _decoration(p)?.color,
           shadowColor: p.color('shadowColor'),
+          surfaceTintColor: p.color('surfaceTintColor'),
           margin: p.inset('margin') ?? const EdgeInsets.all(4),
-          shape: p.n('radius') != null
-              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(p.n('radius')!))
-              : null,
+          borderOnForeground: p.b('borderOnForeground', true),
+          clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
+          shape: Props.toShape(p.s('shape'), p.n('radius') ?? p.n('borderRadius')),
           child: Padding(
             padding: p.inset('padding') ?? const EdgeInsets.all(12),
             child: child0(),
@@ -315,7 +366,21 @@ class Renderer {
         );
         break;
       case 'chip':
-        result = Chip(label: Text((p['text'] ?? p['label'] ?? '').toString()));
+        result = Chip(
+          avatar: p['avatar'] != null ? Icon(Props.toIcon(p['avatar'])) : null,
+          label: Text((p['text'] ?? p['label'] ?? '').toString()),
+          labelStyle: Props.toTextStyle(p),
+          labelPadding: p.inset('labelPadding'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          padding: p.inset('padding'),
+          side: _borderSide(p['side']),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          elevation: p.n('elevation'),
+          shadowColor: p.color('shadowColor'),
+          surfaceTintColor: p.color('surfaceTintColor'),
+          deleteIcon: p['deleteIcon'] != null ? Icon(Props.toIcon(p['deleteIcon'])) : null,
+          onDeleted: p['onDeleted'] != null ? () => _emit(p['onDeleted'], null, fallback: p.map) : null,
+        );
         break;
       case 'listtile':
         result = ListTile(
@@ -323,9 +388,21 @@ class Renderer {
           title: _slotText(p['title'] ?? p['text'], '$path/title'),
           subtitle: _slotText(p['subtitle'], '$path/subtitle'),
           trailing: _slotText(p['trailing'], '$path/trailing'),
+          isThreeLine: p.b('isThreeLine'),
           dense: p.b('dense'),
           enabled: p.b('enabled', true),
           selected: p.b('selected'),
+          autofocus: p.b('autofocus'),
+          contentPadding: p.inset('contentPadding'),
+          minVerticalPadding: p.n('minVerticalPadding'),
+          tileColor: p.color('tileColor'),
+          selectedTileColor: p.color('selectedTileColor'),
+          focusColor: p.color('focusColor'),
+          hoverColor: p.color('hoverColor'),
+          iconColor: p.color('iconColor'),
+          textColor: p.color('textColor'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          enableFeedback: p.b('enableFeedback', true),
           onTap: _tapHandler(p),
           onLongPress: _namedEvent(p, 'longPress'),
         );
@@ -336,67 +413,102 @@ class Renderer {
         result = _listView(p, children, path);
         break;
       case 'gridview':
-        result = GridView.count(
-          crossAxisCount: p.i('crossAxisCount') ?? p.i('columns') ?? 2,
-          mainAxisSpacing: p.n('gap') ?? p.n('mainAxisGap') ?? 8,
-          crossAxisSpacing: p.n('gap') ?? p.n('crossAxisGap') ?? 8,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: children,
+        final gCount = p.i('itemCount');
+        final gTemplate = p['itemTemplate'] ?? p['item'];
+        final gUseBuilder = gTemplate != null && gCount != null && gCount > 0;
+        result = GridView.builder(
+          padding: p.inset('padding'),
+          scrollDirection: p.axis('scrollDirection'),
+          reverse: p.b('reverse'),
+          physics: p.has('physics') ? Props.toPhysics(p['physics']) : const NeverScrollableScrollPhysics(),
+          shrinkWrap: p.has('shrinkWrap') ? p.b('shrinkWrap') : true,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: p.i('crossAxisCount') ?? p.i('columns') ?? 2,
+            mainAxisSpacing: p.n('gap') ?? p.n('mainAxisSpacing') ?? 8,
+            crossAxisSpacing: p.n('gap') ?? p.n('crossAxisSpacing') ?? 8,
+            childAspectRatio: p.n('childAspectRatio') ?? 1.0,
+          ),
+          itemCount: gUseBuilder ? gCount : children.length,
+          itemBuilder: (ctx, i) => gUseBuilder
+              ? (_build(_subst(gTemplate, i), '$path/$i') ?? const SizedBox.shrink())
+              : children[i],
         );
         break;
       case 'divider':
-        result = Divider(color: p.color('color'), thickness: p.n('thickness'));
+        result = Divider(
+          color: p.color('color'),
+          thickness: p.n('thickness'),
+          height: p.n('height'),
+          indent: p.n('indent'),
+          endIndent: p.n('endIndent'),
+        );
         break;
       case 'circularprogressindicator':
-        result = Center(child: CircularProgressIndicator(value: p.n('value')));
+        result = Center(
+          child: CircularProgressIndicator(
+            value: p.n('value'),
+            color: p.color('color'),
+            backgroundColor: p.color('backgroundColor'),
+            strokeWidth: p.n('strokeWidth') ?? 4.0,
+            strokeCap: p.s('strokeCap')?.toLowerCase() == 'round' ? StrokeCap.round : StrokeCap.square,
+            semanticsLabel: p.s('semanticsLabel'),
+          ),
+        );
         break;
       case 'linearprogressindicator':
-        result = LinearProgressIndicator(value: p.n('value'));
+        result = LinearProgressIndicator(
+          value: p.n('value'),
+          color: p.color('color'),
+          backgroundColor: p.color('backgroundColor'),
+          minHeight: p.n('minHeight'),
+          semanticsLabel: p.s('semanticsLabel'),
+          borderRadius: Props.toBorderRadius(p['borderRadius'] ?? p['radius']),
+        );
+        break;
+      case 'snackbar':
+        result = SnackBar(
+          content: child0(),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          duration: p.has('duration') ? Props.toDuration(p['duration']) : const Duration(milliseconds: 4000),
+          behavior: p.s('behavior')?.toLowerCase() == 'floating' ? SnackBarBehavior.floating : SnackBarBehavior.fixed,
+          width: p.n('width'),
+          action: p['action'] != null
+              ? SnackBarAction(label: (p['actionLabel'] ?? 'OK').toString(), onPressed: _tapHandler(p) ?? () {})
+              : null,
+        );
         break;
 
       // ---------- 交互 ----------
       case 'checkbox':
         result = BridgeCheckbox(
           key: _nodeKey(p, path),
-          initial: p.b('value'),
-          color: p.color('color'),
+          p: p,
           onChanged: (v) => _change(p, v),
         );
         break;
       case 'switch':
         result = BridgeSwitch(
           key: _nodeKey(p, path),
-          initial: p.b('value'),
+          p: p,
           onChanged: (v) => _change(p, v),
         );
         break;
       case 'slider':
         result = BridgeSlider(
           key: _nodeKey(p, path),
-          initial: p.n('value') ?? 0,
-          min: p.n('min') ?? 0,
-          max: p.n('max') ?? 1,
+          p: p,
           onChanged: (v) => _change(p, v),
         );
         break;
-      case 'textfield' || 'edittext':
+      case 'textfield' || 'edittext' || 'textformfield':
         result = BridgeTextField(
           key: _nodeKey(p, path),
-          hint: p.s('hint') ?? _decText(p, 'hintText'),
-          label: p.s('label') ?? _decText(p, 'labelText'),
-          initial: p.s('text'),
-          maxLines: p.i('maxLines'),
-          obscure: p.b('obscure') || p.b('obscureText') || p.b('password'),
-          maxLength: p.i('maxLength'),
-          keyboardType: Props.toKeyboardType(p['keyboardType'] ?? p['inputType']),
-          prefixIcon: p.s('prefixIcon') ?? p.s('leftIcon'),
-          suffixIcon: p.s('suffixIcon') ?? p.s('rightIcon'),
-          readOnly: p.b('readOnly'),
-          enabled: p.b('enabled', true),
-          autofocus: p.b('autofocus'),
-          textAlign: Props.toTextAlign(p['textAlign']),
+          p: p,
           onChanged: (v) => _change(p, v),
+          onSubmitted: (p['onSubmitted'] ?? p['onSubmit']) != null
+              ? (v) => _emit(p['onSubmitted'] ?? p['onSubmit'], v, fallback: p.map)
+              : null,
         );
         break;
       case 'inkwell':
@@ -418,8 +530,7 @@ class Renderer {
               )
             : BridgeDropdown(
                 key: _nodeKey(p, path),
-                initial: p.s('value'),
-                items: p.list('items'),
+                p: p,
                 onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
               );
         break;
@@ -434,7 +545,17 @@ class Renderer {
           endDrawer: _build(p['endDrawer'], '$path/endDrawer'),
           body: _build(p['body'], '$path/body') ?? child0(),
           bottomNavigationBar: _build(p['bottomNavigationBar'], '$path/bottomNav'),
+          bottomSheet: _build(p['bottomSheet'], '$path/bottomSheet'),
           floatingActionButton: _build(p['floatingActionButton'], '$path/fab'),
+          floatingActionButtonLocation: _fabLocation(p.s('floatingActionButtonLocation')),
+          persistentFooterButtons: p.list('persistentFooterButtons').isEmpty
+              ? null
+              : _children(p['persistentFooterButtons'], '$path/footer'),
+          extendBody: p.b('extendBody'),
+          extendBodyBehindAppBar: p.b('extendBodyBehindAppBar'),
+          resizeToAvoidBottomInset: p.has('resizeToAvoidBottomInset') ? p.b('resizeToAvoidBottomInset', true) : null,
+          drawerEnableOpenDragGesture: p.b('drawerEnableOpenDragGesture', true),
+          endDrawerEnableOpenDragGesture: p.b('endDrawerEnableOpenDragGesture', true),
         );
         break;
       case 'appbar':
@@ -442,11 +563,18 @@ class Renderer {
           title: _build(p['title'], '$path/title'),
           leading: _build(p['leading'], '$path/leading'),
           actions: _children(p['actions'], '$path/actions'),
+          bottom: _preferred(_build(p['bottom'], '$path/bottom')),
           elevation: p.n('elevation'),
+          scrolledUnderElevation: p.n('scrolledUnderElevation'),
+          shadowColor: p.color('shadowColor'),
+          surfaceTintColor: p.color('surfaceTintColor'),
           backgroundColor: p.color('backgroundColor') ?? p.color('color'),
           foregroundColor: p.color('foregroundColor'),
           centerTitle: p.b('centerTitle'),
+          titleSpacing: p.n('titleSpacing'),
+          leadingWidth: p.n('leadingWidth'),
           toolbarHeight: p.n('toolbarHeight'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
           automaticallyImplyLeading: p.b('automaticallyImplyLeading', true),
         );
         break;
@@ -480,11 +608,23 @@ class Renderer {
         result = TabBar(
           tabs: p.list('tabs').map((t) {
             final tp = Props.of(t);
-            return Tab(text: (tp['text'] ?? tp['label'])?.toString());
+            return Tab(
+              text: (tp['text'] ?? tp['label'])?.toString(),
+              icon: tp['icon'] != null ? Icon(Props.toIcon(tp['icon'])) : null,
+            );
           }).toList(),
+          isScrollable: p.b('isScrollable'),
           indicatorColor: p.color('indicatorColor'),
+          indicatorWeight: p.n('indicatorWeight') ?? 2.0,
+          indicatorSize: p.s('indicatorSize')?.toLowerCase() == 'label' ? TabBarIndicatorSize.label : TabBarIndicatorSize.tab,
           labelColor: p.color('labelColor'),
           unselectedLabelColor: p.color('unselectedLabelColor'),
+          labelStyle: p['labelStyle'] != null ? Props.toTextStyle(Props.of(p['labelStyle'])) : null,
+          unselectedLabelStyle: p['unselectedLabelStyle'] != null ? Props.toTextStyle(Props.of(p['unselectedLabelStyle'])) : null,
+          labelPadding: p.inset('labelPadding'),
+          padding: p.inset('padding'),
+          dividerColor: p.color('dividerColor'),
+          automaticIndicatorColorAdjustment: p.b('automaticIndicatorColorAdjustment', true),
         );
         break;
       case 'tabbarview':
@@ -938,6 +1078,253 @@ class Renderer {
         );
         break;
 
+      // ============================================================
+      // 复杂控件
+      // ============================================================
+      case 'pageview':
+        result = BridgePageView(
+          key: _nodeKey(p, path),
+          p: p,
+          children: children,
+          onChanged: (i) => _emit(p['onChange'], i, fallback: p.map),
+        );
+        break;
+      case 'navigationrail':
+        result = NavigationRail(
+          selectedIndex: p.i('selectedIndex') ?? p.i('currentIndex') ?? 0,
+          extended: p.b('extended'),
+          minWidth: p.n('minWidth'),
+          minExtendedWidth: p.n('minExtendedWidth'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          labelType: p.s('labelType')?.toLowerCase() == 'none' ? NavigationRailLabelType.none : NavigationRailLabelType.all,
+          groupAlignment: p.n('groupAlignment') ?? -1.0,
+          useIndicator: p.b('useIndicator', true),
+          onDestinationSelected: (i) => _emit(p['onTap'] ?? p['onChange'], i, fallback: p.map),
+          destinations: p.list('items').map((e) {
+            final ip = Props.of(e);
+            return NavigationRailDestination(
+              icon: Icon(Props.toIcon(ip['icon'])),
+              selectedIcon: ip['selectedIcon'] != null ? Icon(Props.toIcon(ip['selectedIcon'])) : null,
+              label: Text((ip['label'] ?? ip['text'] ?? '').toString()),
+            );
+          }).toList(),
+        );
+        break;
+      case 'dropdownmenu':
+        result = DropdownMenu<String>(
+          initialSelection: p.s('initialSelection') ?? p.s('value'),
+          label: p['label'] != null ? Text(p['label'].toString()) : null,
+          hintText: p.s('hintText') ?? p.s('hint'),
+          helperText: p.s('helperText'),
+          errorText: p.s('errorText'),
+          enabled: p.b('enabled', true),
+          requestFocusOnTap: p.b('requestFocusOnTap'),
+          width: p.n('width'),
+          menuHeight: p.n('menuHeight'),
+          textStyle: Props.toTextStyle(p),
+          dropdownMenuEntries: p.list('items').map((e) {
+            final ip = Props.of(e);
+            return DropdownMenuEntry<String>(
+              value: (ip['value'] ?? ip['text'] ?? '').toString(),
+              label: (ip['label'] ?? ip['text'] ?? '').toString(),
+              enabled: ip['enabled'] == null ? true : Props.toBool(ip['enabled']) ?? true,
+            );
+          }).toList(),
+          onSelected: (v) => _emit(p['onChange'], v, fallback: p.map),
+        );
+        break;
+      case 'reorderablelistview':
+        final rCount = p.i('itemCount');
+        final rTemplate = p['itemTemplate'] ?? p['item'];
+        if (rTemplate != null && rCount != null && rCount > 0) {
+          result = ReorderableListView.builder(
+            padding: p.inset('padding'),
+            physics: Props.toPhysics(p['physics']),
+            shrinkWrap: p.b('shrinkWrap'),
+            buildDefaultDragHandles: p.b('buildDefaultDragHandles', true),
+            itemCount: rCount,
+            itemBuilder: (ctx, i) => KeyedSubtree(
+              key: ValueKey('$path/ri$i'),
+              child: _build(_subst(rTemplate, i), '$path/$i') ?? const SizedBox.shrink(),
+            ),
+            onReorderItem: (a, b) => _emit(p['onReorder'], {'oldIndex': a, 'newIndex': b}, fallback: p.map),
+          );
+        } else {
+          result = ListView(children: children);
+        }
+        break;
+      case 'expansionpanelList':
+        final panels = p.list('panels');
+        result = ExpansionPanelList(
+          elevation: p.n('elevation') ?? 1,
+          expansionCallback: (i, isExpanded) => _emit(p['onChange'], {'index': i, 'isExpanded': isExpanded}, fallback: p.map),
+          children: panels.map((e) {
+            final ep = Props.of(e);
+            final expanded = ep.b('expanded') || ep.b('isExpanded');
+            final header = ep['header'] ?? ep['title'];
+            final body = ep['body'] ?? ep['content'];
+            return ExpansionPanel(
+              isExpanded: expanded,
+              canTapOnHeader: ep.b('canTapOnHeader'),
+              headerBuilder: (ctx, isExpanded) => header is Map || header is List
+                  ? (_build(header, '$path/header') ?? const SizedBox.shrink())
+                  : ListTile(title: Text((header ?? '').toString())),
+              body: body is Map || body is List ? (_build(body, '$path/body') ?? const SizedBox.shrink()) : Text((body ?? '').toString()),
+            );
+          }).toList(),
+        );
+        break;
+      case 'table':
+        final tRows = p.list('rows');
+        result = Table(
+          border: p['border'] != null ? TableBorder.all() : null,
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          columnWidths: null,
+          children: tRows.map((row) {
+            final cells = Props.toList(row);
+            return TableRow(
+              children: cells.map((c) => TableCell(child: _dataCell(c, '$path/cell'))).toList(),
+            );
+          }).toList(),
+        );
+        break;
+      case 'customscrollview':
+        result = CustomScrollView(
+          scrollDirection: p.axis('scrollDirection'),
+          reverse: p.b('reverse'),
+          physics: Props.toPhysics(p['physics']),
+          shrinkWrap: p.b('shrinkWrap'),
+          slivers: children,
+        );
+        break;
+      case 'slivertoboxadapter':
+        result = SliverToBoxAdapter(child: child0());
+        break;
+      case 'sliverpadding':
+        result = SliverPadding(padding: p.inset('padding') ?? EdgeInsets.zero, sliver: children.isNotEmpty ? children[0] : const SliverToBoxAdapter());
+        break;
+      case 'sliverlist':
+        result = SliverList(delegate: SliverChildListDelegate(children));
+        break;
+      case 'slivergrid':
+        result = SliverGrid(
+          delegate: SliverChildListDelegate(children),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: p.i('crossAxisCount') ?? p.i('columns') ?? 2,
+            mainAxisSpacing: p.n('gap') ?? p.n('mainAxisSpacing') ?? 8,
+            crossAxisSpacing: p.n('gap') ?? p.n('crossAxisSpacing') ?? 8,
+            childAspectRatio: p.n('childAspectRatio') ?? 1.0,
+          ),
+        );
+        break;
+      case 'sliverfillremaining':
+        result = SliverFillRemaining(hasScrollBody: p.b('hasScrollBody', true), child: child0());
+        break;
+      case 'sliverappbar':
+        result = SliverAppBar(
+          title: _build(p['title'], '$path/title'),
+          leading: _build(p['leading'], '$path/leading'),
+          actions: _children(p['actions'], '$path/actions'),
+          floating: p.b('floating'),
+          pinned: p.b('pinned'),
+          snap: p.b('snap'),
+          expandedHeight: p.n('expandedHeight'),
+          toolbarHeight: p.n('toolbarHeight') ?? kToolbarHeight,
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          foregroundColor: p.color('foregroundColor'),
+          elevation: p.n('elevation'),
+          centerTitle: p.b('centerTitle'),
+          flexibleSpace: _build(p['flexibleSpace'], '$path/flexible'),
+        );
+        break;
+
+      // ============================================================
+      // 动画
+      // ============================================================
+      case 'animatedpositioned':
+        result = AnimatedPositioned(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          curve: Props.toCurve(p.s('curve')),
+          left: Props.dim(p['left']),
+          top: Props.dim(p['top']),
+          right: Props.dim(p['right']),
+          bottom: Props.dim(p['bottom']),
+          width: Props.dim(p['width']),
+          height: Props.dim(p['height']),
+          child: child0(),
+        );
+        break;
+      case 'animatedsize':
+        result = AnimatedSize(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          curve: Props.toCurve(p.s('curve')),
+          alignment: p.align('alignment') ?? Alignment.center,
+          child: child0(),
+        );
+        break;
+      case 'animatedtheme':
+        result = AnimatedTheme(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          data: ThemeData(
+            colorSchemeSeed: p.color('colorSchemeSeed'),
+            brightness: p.s('brightness')?.toLowerCase() == 'dark' ? Brightness.dark : Brightness.light,
+          ),
+          child: child0(),
+        );
+        break;
+
+      // ============================================================
+      // 弹窗组件（声明式，直接内联在树里渲染）
+      // ============================================================
+      case 'alertdialog':
+        result = AlertDialog(
+          icon: _build(p['icon'], '$path/icon'),
+          title: _build(p['title'], '$path/title'),
+          content: _build(p['content'], '$path/content') ?? (p['text'] != null ? Text(p['text'].toString()) : null),
+          actions: _children(p['actions'], '$path/actions'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          shadowColor: p.color('shadowColor'),
+          surfaceTintColor: p.color('surfaceTintColor'),
+          insetPadding: p.inset('insetPadding'),
+          actionsPadding: p.inset('actionsPadding'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          alignment: p.align('alignment'),
+          scrollable: p.b('scrollable'),
+        );
+        break;
+      case 'simpledialog':
+        result = SimpleDialog(
+          title: _build(p['title'], '$path/title'),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          children: children,
+        );
+        break;
+      case 'dialog':
+        result = Dialog(
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          insetPadding: p.inset('insetPadding') ?? const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
+          child: child0(),
+        );
+        break;
+      case 'bottomsheet':
+        result = BottomSheet(
+          onClosing: () => _emit(p['onClosing'], null, fallback: p.map),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          elevation: p.n('elevation'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          enableDrag: p.b('enableDrag', true),
+          showDragHandle: p.b('showDragHandle'),
+          builder: (ctx) => child0(),
+        );
+        break;
+
       // ---------- 原生 ----------
       case 'androidview':
       case 'android':
@@ -971,6 +1358,12 @@ class Renderer {
     final physics = Props.toPhysics(p['physics']);
     final shrinkWrap = p.b('shrinkWrap');
     final axis = p.axis('scrollDirection');
+    final reverse = p.b('reverse');
+    final itemExtent = p.n('itemExtent');
+    final cacheExtent = p.n('cacheExtent');
+    final keyboardDismiss = p.s('keyboardDismissBehavior')?.toLowerCase() == 'ondrag'
+        ? ScrollViewKeyboardDismissBehavior.onDrag
+        : ScrollViewKeyboardDismissBehavior.manual;
 
     final count = p.i('itemCount');
     final template = p['itemTemplate'] ?? p['item'];
@@ -981,6 +1374,12 @@ class Renderer {
         physics: physics,
         shrinkWrap: shrinkWrap,
         scrollDirection: axis,
+        reverse: reverse,
+        itemExtent: itemExtent,
+        scrollCacheExtent: cacheExtent != null ? ScrollCacheExtent.pixels(cacheExtent) : null,
+        addAutomaticKeepAlives: p.b('addAutomaticKeepAlives', true),
+        addRepaintBoundaries: p.b('addRepaintBoundaries', true),
+        keyboardDismissBehavior: keyboardDismiss,
         itemCount: count,
         itemBuilder: (ctx, i) => _build(_subst(template, i), '$path/$i') ?? const SizedBox.shrink(),
       );
@@ -990,6 +1389,12 @@ class Renderer {
       physics: physics,
       shrinkWrap: shrinkWrap,
       scrollDirection: axis,
+      reverse: reverse,
+      itemExtent: itemExtent,
+      scrollCacheExtent: cacheExtent != null ? ScrollCacheExtent.pixels(cacheExtent) : null,
+      addAutomaticKeepAlives: p.b('addAutomaticKeepAlives', true),
+      addRepaintBoundaries: p.b('addRepaintBoundaries', true),
+      keyboardDismissBehavior: keyboardDismiss,
       itemCount: children.length,
       itemBuilder: (ctx, i) => children[i],
     );
@@ -1187,29 +1592,44 @@ class Renderer {
     final w = Props.dim(p['width']);
     final h = Props.dim(p['height']);
     final fit = Props.toBoxFit(p['fit']);
+    final alignment = p.align('alignment') ?? Alignment.center;
+    final repeat = Props.toImageRepeat(p['repeat']);
+    final color = p.color('imageColor');
+    final blend = Props.toBlendMode(p['colorBlendMode']);
+    final quality = Props.toFilterQuality(p['filterQuality']);
+    final label = p.s('semanticLabel');
     if (src == null || src.isEmpty) return _imagePlaceholder(p);
+
+    Widget make(ImageProvider provider) => Image(
+          image: provider,
+          width: w,
+          height: h,
+          fit: fit,
+          alignment: alignment,
+          repeat: repeat,
+          color: color,
+          colorBlendMode: blend,
+          filterQuality: quality,
+          semanticLabel: label,
+          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'),
+        );
 
     Widget img;
     if (src.startsWith('http://') || src.startsWith('https://')) {
-      img = Image.network(src, width: w, height: h, fit: fit,
-          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+      img = make(NetworkImage(src));
     } else if (src.startsWith('data:')) {
       final comma = src.indexOf(',');
       if (comma < 0) return _imagePlaceholder(p, error: '非法 data URI');
       try {
-        final bytes = base64Decode(src.substring(comma + 1));
-        img = Image.memory(bytes, width: w, height: h, fit: fit,
-            errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+        img = make(MemoryImage(base64Decode(src.substring(comma + 1))));
       } catch (e) {
         return _imagePlaceholder(p, error: 'base64 解码失败: $e');
       }
     } else if (src.startsWith('file://') || src.startsWith('/') || src.startsWith('storage/')) {
       final path = src.startsWith('file://') ? Uri.parse(src).toFilePath() : src;
-      img = Image.file(File(path), width: w, height: h, fit: fit,
-          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+      img = make(FileImage(File(path)));
     } else {
-      img = Image.asset(src, width: w, height: h, fit: fit,
-          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+      img = make(AssetImage(src));
     }
 
     final radius = p.n('radius') ?? p.n('borderRadius');
@@ -1232,9 +1652,74 @@ class Renderer {
   }
 
   /// 日期解析：支持 ISO 字符串或毫秒时间戳。
-  static DateTime? _parseDate(dynamic v) {
+  static FloatingActionButtonLocation? _fabLocation(String? v) {
+    switch (v?.toLowerCase()) {
+      case 'centerfloat': return FloatingActionButtonLocation.centerFloat;
+      case 'centerdocked': return FloatingActionButtonLocation.centerDocked;
+      case 'centertop': return FloatingActionButtonLocation.centerTop;
+      case 'endfloat': return FloatingActionButtonLocation.endFloat;
+      case 'enddocked': return FloatingActionButtonLocation.endDocked;
+      case 'endtop': return FloatingActionButtonLocation.endTop;
+      case 'startfloat': return FloatingActionButtonLocation.startFloat;
+      case 'startdocked': return FloatingActionButtonLocation.startDocked;
+      case 'starttop': return FloatingActionButtonLocation.startTop;
+      default: return null;
+    }
+  }
+
+  /// 颜色 -> `WidgetStateProperty<Color?>`（Switch/Checkbox 的 thumbColor/trackColor/fillColor 等需要）。
+  static WidgetStateProperty<Color?>? _colorState(Props p, String key) {
+    final c = p.color(key);
+    return c == null ? null : WidgetStatePropertyAll<Color?>(c);
+  }
+
+  /// InputDecoration 的边框：字符串（outline/underline/none）或 {type, radius, color, width, side}。
+  static InputBorder? _inputBorder(Props p, String key) {
+    final v = p[key];
     if (v == null) return null;
-    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+    String type = 'outline';
+    double? radius;
+    BorderSide? side;
+    if (v is Map) {
+      final m = Props.of(v);
+      type = (m.s('type') ?? 'outline').toString().toLowerCase();
+      radius = m.n('radius');
+      side = _borderSide(m['side'] ?? m['borderSide']);
+      if (side == null && (m.has('color') || m.has('width'))) {
+        side = BorderSide(color: m.color('color') ?? Colors.black26, width: m.n('width') ?? 1);
+      }
+    } else {
+      type = v.toString().toLowerCase();
+    }
+    switch (type) {
+      case 'none':
+        return InputBorder.none;
+      case 'underline':
+        return UnderlineInputBorder(
+          borderRadius: radius != null
+              ? BorderRadius.circular(radius)
+              : const BorderRadius.only(topLeft: Radius.circular(4), topRight: Radius.circular(4)),
+          borderSide: side ?? const BorderSide(),
+        );
+      default:
+        return OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radius ?? 4),
+          borderSide: side ?? const BorderSide(),
+        );
+    }
+  }
+
+  static FloatingLabelBehavior? _floatingLabel(String? v) {
+    switch (v?.toLowerCase()) {
+      case 'always': return FloatingLabelBehavior.always;
+      case 'never': return FloatingLabelBehavior.never;
+      case 'auto': return FloatingLabelBehavior.auto;
+      default: return null;
+    }
+  }
+
+  static DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
     return DateTime.tryParse(v.toString());
   }
 
@@ -1244,6 +1729,28 @@ class Renderer {
         minHeight: p.nz('minHeight'),
         maxHeight: p.n('maxHeight') ?? double.infinity,
       );
+
+  /// 变换矩阵：接受 16 个数字的列表，或 {translateX/Y/Z, scaleX/Y, rotateZ} 形式的简易描述。
+  static Matrix4? _matrix4(dynamic v) {
+    if (v is List && v.length == 16) {
+      final n = v.map(Props.toNum).whereType<double>().toList();
+      if (n.length == 16) return Matrix4.fromList(n);
+    }
+    if (v is Map) {
+      final m = v.cast<String, dynamic>();
+      final t = Matrix4.identity();
+      final tx = Props.toNum(m['translateX']);
+      final ty = Props.toNum(m['translateY']);
+      final sx = Props.toNum(m['scaleX']);
+      final sy = Props.toNum(m['scaleY']);
+      final rz = Props.toNum(m['rotateZ']);
+      if (sx != null || sy != null) t.scaleByDouble(sx ?? 1.0, sy ?? 1.0, 1.0, 1.0);
+      if (rz != null) t.rotateZ(rz);
+      if (tx != null || ty != null) t.translateByDouble(tx ?? 0.0, ty ?? 0.0, 0.0, 1.0);
+      return t;
+    }
+    return null;
+  }
 
   static Offset? _offset(dynamic v) {
     if (v is List && v.length >= 2) {
@@ -1329,17 +1836,20 @@ class Renderer {
   static BoxDecoration? _decoration(Props p) {
     final dp = Props.of(p['decoration']);
     final color = dp.color('color') ?? p.color('color') ?? p.color('backgroundColor');
-    final gradient = Props.toGradient(dp['gradient'] ?? p['gradient']);
-    final radius = dp.n('radius') ?? dp.n('borderRadius') ?? p.n('radius');
+    final gradient = Props.toAnyGradient(dp['gradient'] ?? p['gradient']);
+    final radius = dp.n('radius') ?? dp.n('borderRadius') ?? p.n('radius') ?? p.n('borderRadius');
     final border = _decoBorder(dp, p);
-    final shadows = Props.toShadows(dp['boxShadow'] ?? dp['shadows'] ?? p['boxShadow']);
-    if (color == null && gradient == null && radius == null && border == null && shadows == null) {
+    final shadows = Props.toShadows(dp['boxShadow'] ?? dp['shadows'] ?? p['boxShadow'] ?? p['shadows']);
+    final shape = dp.s('shape') ?? p.s('shape');
+    if (color == null && gradient == null && radius == null && border == null && shadows == null && shape == null) {
       return null;
     }
+    final boxShape = Props.toBoxShape(shape ?? 'rectangle');
     return BoxDecoration(
       color: color,
       gradient: gradient,
-      borderRadius: radius != null ? BorderRadius.circular(radius) : null,
+      shape: boxShape,
+      borderRadius: (boxShape == BoxShape.rectangle && radius != null) ? BorderRadius.circular(radius) : null,
       border: border,
       boxShadow: shadows,
     );
@@ -1374,16 +1884,70 @@ class Renderer {
     final fg = sp.color('foregroundColor') ?? p.color('foregroundColor');
     final pad = sp.inset('padding') ?? p.inset('padding');
     final el = sp.n('elevation') ?? p.n('elevation');
-    final radius = sp.n('radius') ?? p.n('radius');
-    if (bg == null && fg == null && pad == null && el == null && radius == null) return null;
+    final shadow = sp.color('shadowColor') ?? p.color('shadowColor');
+    final overlay = sp.color('overlayColor') ?? p.color('overlayColor');
+    final surface = sp.color('surfaceTintColor') ?? p.color('surfaceTintColor');
+    final radius = sp.n('radius') ?? sp.n('borderRadius') ?? p.n('radius') ?? p.n('borderRadius');
+    final shapeName = sp.s('shape') ?? p.s('shape');
+    final shape = Props.toShape(shapeName, radius);
+    final side = _borderSide(sp['side'] ?? p['side']);
+    final minSize = _size(sp['minimumSize'] ?? p['minimumSize']);
+    final fixedSize = _size(sp['fixedSize'] ?? p['fixedSize']);
+    final maxSize = _size(sp['maximumSize'] ?? p['maximumSize']);
+    final textStyle = (sp['textStyle'] ?? p['textStyle']) != null
+        ? Props.toTextStyle(Props.of(sp['textStyle'] ?? p['textStyle']))
+        : null;
+    final tapTarget = p.has('tapTargetSize')
+        ? (p.s('tapTargetSize')?.toLowerCase() == 'shrinkwrap'
+            ? MaterialTapTargetSize.shrinkWrap
+            : MaterialTapTargetSize.padded)
+        : null;
+    final density = p.list('visualDensity');
+    final visualDensity = density.length == 2
+        ? VisualDensity(horizontal: Props.toNum(density[0]) ?? 0, vertical: Props.toNum(density[1]) ?? 0)
+        : null;
+    if (bg == null && fg == null && pad == null && el == null && shadow == null && overlay == null &&
+        surface == null && shape == null && side == null && minSize == null && fixedSize == null &&
+        maxSize == null && textStyle == null && tapTarget == null && visualDensity == null && !p.has('animationDuration')) {
+      return null;
+    }
     return ButtonStyle(
       backgroundColor: bg != null ? WidgetStatePropertyAll<Color>(bg) : null,
       foregroundColor: fg != null ? WidgetStatePropertyAll<Color>(fg) : null,
+      overlayColor: overlay != null ? WidgetStatePropertyAll<Color>(overlay) : null,
+      shadowColor: shadow != null ? WidgetStatePropertyAll<Color>(shadow) : null,
+      surfaceTintColor: surface != null ? WidgetStatePropertyAll<Color>(surface) : null,
       padding: pad != null ? WidgetStatePropertyAll<EdgeInsetsGeometry>(pad) : null,
       elevation: el != null ? WidgetStatePropertyAll<double>(el) : null,
-      shape: radius != null
-          ? WidgetStatePropertyAll<OutlinedBorder>(RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)))
-          : null,
+      shape: shape != null ? WidgetStatePropertyAll<OutlinedBorder>(shape) : null,
+      side: side != null ? WidgetStatePropertyAll<BorderSide>(side) : null,
+      minimumSize: minSize != null ? WidgetStatePropertyAll<Size>(minSize) : null,
+      fixedSize: fixedSize != null ? WidgetStatePropertyAll<Size>(fixedSize) : null,
+      maximumSize: maxSize != null ? WidgetStatePropertyAll<Size>(maxSize) : null,
+      textStyle: textStyle != null ? WidgetStatePropertyAll<TextStyle>(textStyle) : null,
+      tapTargetSize: tapTarget,
+      visualDensity: visualDensity,
+      animationDuration: p.has('animationDuration') ? Props.toDuration(p['animationDuration']) : null,
+    );
+  }
+
+  /// [宽, 高] -> Size。
+  static Size? _size(dynamic v) {
+    if (v is List && v.length >= 2) {
+      return Size(Props.toNum(v[0]) ?? 0, Props.toNum(v[1]) ?? 0);
+    }
+    return null;
+  }
+
+  /// 边框线：{color, width, style}。
+  static BorderSide? _borderSide(dynamic v) {
+    if (v is! Map) return null;
+    final m = v.cast<String, dynamic>();
+    if (m.isEmpty) return null;
+    return BorderSide(
+      color: Props.toColor(m['color']) ?? Colors.black26,
+      width: Props.toNum(m['width']) ?? 1,
+      style: Props.toBorderStyle(m['style']),
     );
   }
 
@@ -1434,50 +1998,80 @@ class _Series {
 // ============================================================
 
 class BridgeSwitch extends StatefulWidget {
-  const BridgeSwitch({super.key, required this.initial, required this.onChanged});
-  final bool initial;
+  const BridgeSwitch({super.key, required this.p, required this.onChanged});
+  final Props p;
   final ValueChanged<bool> onChanged;
   @override
   State<BridgeSwitch> createState() => _BridgeSwitchState();
 }
 
 class _BridgeSwitchState extends State<BridgeSwitch> {
-  late bool _value = widget.initial;
+  late bool _value = widget.p.b('value');
   @override
   void didUpdateWidget(BridgeSwitch old) {
     super.didUpdateWidget(old);
-    // 受控：Lua 重新 render 时若 value 变了，则同步回内部状态（不依赖重新创建 widget）。
-    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+    final next = widget.p.b('value');
+    if (next != old.p.b('value')) setState(() => _value = next);
   }
   @override
-  Widget build(BuildContext context) => Switch(
-        value: _value,
-        onChanged: (v) { setState(() => _value = v); widget.onChanged(v); },
-      );
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    return Switch(
+      value: _value,
+      activeThumbColor: p.color('activeThumbColor') ?? p.color('activeColor'),
+      activeTrackColor: p.color('activeTrackColor'),
+      inactiveThumbColor: p.color('inactiveThumbColor'),
+      inactiveTrackColor: p.color('inactiveTrackColor'),
+      thumbColor: Renderer._colorState(p, 'thumbColor'),
+      trackColor: Renderer._colorState(p, 'trackColor'),
+      trackOutlineColor: Renderer._colorState(p, 'trackOutlineColor'),
+      focusColor: p.color('focusColor'),
+      hoverColor: p.color('hoverColor'),
+      autofocus: p.b('autofocus'),
+      onChanged: p.b('enabled', true)
+          ? (v) { setState(() => _value = v); widget.onChanged(v); }
+          : null,
+    );
+  }
 }
 
 class BridgeCheckbox extends StatefulWidget {
-  const BridgeCheckbox({super.key, required this.initial, this.color, required this.onChanged});
-  final bool initial;
-  final Color? color;
+  const BridgeCheckbox({super.key, required this.p, required this.onChanged});
+  final Props p;
   final ValueChanged<bool> onChanged;
   @override
   State<BridgeCheckbox> createState() => _BridgeCheckboxState();
 }
 
 class _BridgeCheckboxState extends State<BridgeCheckbox> {
-  late bool _value = widget.initial;
+  late bool _value = widget.p.b('value');
   @override
   void didUpdateWidget(BridgeCheckbox old) {
     super.didUpdateWidget(old);
-    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+    final next = widget.p.b('value');
+    if (next != old.p.b('value')) setState(() => _value = next);
   }
   @override
-  Widget build(BuildContext context) => Checkbox(
-        value: _value,
-        activeColor: widget.color,
-        onChanged: (v) { setState(() => _value = v == true); widget.onChanged(v == true); },
-      );
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    return Checkbox(
+      value: _value,
+      tristate: p.b('tristate'),
+      activeColor: p.color('activeColor'),
+      fillColor: Renderer._colorState(p, 'fillColor'),
+      checkColor: p.color('checkColor'),
+      focusColor: p.color('focusColor'),
+      hoverColor: p.color('hoverColor'),
+      side: Renderer._borderSide(p['side']),
+      shape: Props.toShape(p.s('shape'), p.n('radius')),
+      autofocus: p.b('autofocus'),
+      isError: p.b('isError'),
+      semanticLabel: p.s('semanticLabel'),
+      onChanged: p.b('enabled', true)
+          ? (v) { setState(() => _value = v == true); widget.onChanged(v == true); }
+          : null,
+    );
+  }
 }
 
 class BridgeSwitchListTile extends StatefulWidget {
@@ -1533,99 +2127,122 @@ class _BridgeCheckboxListTileState extends State<BridgeCheckboxListTile> {
 }
 
 class BridgeSlider extends StatefulWidget {
-  const BridgeSlider({super.key, required this.initial, required this.min, required this.max, required this.onChanged});
-  final double initial;
-  final double min;
-  final double max;
+  const BridgeSlider({super.key, required this.p, required this.onChanged});
+  final Props p;
   final ValueChanged<double> onChanged;
   @override
   State<BridgeSlider> createState() => _BridgeSliderState();
 }
 
 class _BridgeSliderState extends State<BridgeSlider> {
-  late double _value = widget.initial;
+  late double _value = widget.p.n('value') ?? 0;
   @override
   void didUpdateWidget(BridgeSlider old) {
     super.didUpdateWidget(old);
-    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+    final next = widget.p.n('value');
+    if (next != null && next != old.p.n('value')) setState(() => _value = next);
   }
   @override
-  Widget build(BuildContext context) => Slider(
-        value: _value.clamp(widget.min, widget.max),
-        min: widget.min,
-        max: widget.max,
-        onChanged: (v) { setState(() => _value = v); widget.onChanged(v); },
-      );
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    final min = p.n('min') ?? 0;
+    final max = p.n('max') ?? 1;
+    return Slider(
+      value: _value.clamp(min, max <= min ? min + 1 : max),
+      min: min,
+      max: max <= min ? min + 1 : max,
+      divisions: p.i('divisions'),
+      label: p.s('label'),
+      activeColor: p.color('activeColor'),
+      inactiveColor: p.color('inactiveColor'),
+      thumbColor: p.color('thumbColor'),
+      secondaryActiveColor: p.color('secondaryActiveColor'),
+      autofocus: p.b('autofocus'),
+      onChanged: p.b('enabled', true)
+          ? (v) { setState(() => _value = v); widget.onChanged(v); }
+          : null,
+    );
+  }
 }
 
 class BridgeTextField extends StatefulWidget {
-  const BridgeTextField({
-    super.key,
-    this.hint,
-    this.label,
-    this.initial,
-    this.maxLines,
-    this.obscure = false,
-    this.maxLength,
-    this.keyboardType,
-    this.prefixIcon,
-    this.suffixIcon,
-    this.readOnly = false,
-    this.enabled = true,
-    this.autofocus = false,
-    this.textAlign = TextAlign.start,
-    required this.onChanged,
-  });
-  final String? hint;
-  final String? label;
-  final String? initial;
-  final int? maxLines;
-  final bool obscure;
-  final int? maxLength;
-  final TextInputType? keyboardType;
-  final String? prefixIcon;
-  final String? suffixIcon;
-  final bool readOnly;
-  final bool enabled;
-  final bool autofocus;
-  final TextAlign textAlign;
+  const BridgeTextField({super.key, required this.p, required this.onChanged, this.onSubmitted});
+  final Props p;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String>? onSubmitted;
   @override
   State<BridgeTextField> createState() => _BridgeTextFieldState();
 }
 
 class _BridgeTextFieldState extends State<BridgeTextField> {
-  late final TextEditingController _controller = TextEditingController(text: widget.initial ?? '');
+  late final TextEditingController _controller = TextEditingController(text: widget.p.s('text') ?? '');
   @override
   void didUpdateWidget(BridgeTextField old) {
     super.didUpdateWidget(old);
     // 受控：Lua 回写 text 且与当前内容不同时更新（避免输入中被打断）。
-    final next = widget.initial ?? '';
-    if (next != old.initial && _controller.text != next) {
+    final next = widget.p.s('text') ?? '';
+    final prev = old.p.s('text') ?? '';
+    if (next != prev && _controller.text != next) {
       _controller.text = next;
     }
   }
   @override
   void dispose() { _controller.dispose(); super.dispose(); }
+
   @override
-  Widget build(BuildContext context) => TextField(
-        controller: _controller,
-        maxLines: widget.obscure ? 1 : widget.maxLines,
-        obscureText: widget.obscure,
-        maxLength: widget.maxLength,
-        keyboardType: widget.keyboardType,
-        readOnly: widget.readOnly,
-        enabled: widget.enabled,
-        autofocus: widget.autofocus,
-        textAlign: widget.textAlign,
-        decoration: InputDecoration(
-          hintText: widget.hint,
-          labelText: widget.label,
-          prefixIcon: widget.prefixIcon != null ? Icon(Props.toIcon(widget.prefixIcon)) : null,
-          suffixIcon: widget.suffixIcon != null ? Icon(Props.toIcon(widget.suffixIcon)) : null,
-        ),
-        onChanged: widget.onChanged,
-      );
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    final obscure = p.b('obscure') || p.b('obscureText') || p.b('password');
+    return TextField(
+      controller: _controller,
+      decoration: InputDecoration(
+        hintText: p.s('hint') ?? p.s('hintText'),
+        labelText: p.s('label') ?? p.s('labelText'),
+        helperText: p.s('helperText'),
+        errorText: p.s('errorText'),
+        counterText: p.s('counterText'),
+        prefixText: p.s('prefixText'),
+        suffixText: p.s('suffixText'),
+        prefixIcon: p['prefixIcon'] != null ? Icon(Props.toIcon(p['prefixIcon'])) : null,
+        suffixIcon: p['suffixIcon'] != null ? Icon(Props.toIcon(p['suffixIcon'])) : null,
+        filled: p.has('filled') ? p.b('filled') : (p.has('fillColor') ? true : null),
+        fillColor: p.color('fillColor'),
+        contentPadding: p.inset('contentPadding'),
+        border: Renderer._inputBorder(p, 'border'),
+        enabledBorder: Renderer._inputBorder(p, 'enabledBorder'),
+        focusedBorder: Renderer._inputBorder(p, 'focusedBorder'),
+        errorBorder: Renderer._inputBorder(p, 'errorBorder'),
+        disabledBorder: Renderer._inputBorder(p, 'disabledBorder'),
+        focusedErrorBorder: Renderer._inputBorder(p, 'focusedErrorBorder'),
+        floatingLabelBehavior: Renderer._floatingLabel(p.s('floatingLabelBehavior')),
+        alignLabelWithHint: p.has('alignLabelWithHint') ? p.b('alignLabelWithHint') : null,
+        isDense: p.has('isDense') ? p.b('isDense') : null,
+      ),
+      keyboardType: Props.toKeyboardType(p['keyboardType'] ?? p['inputType']),
+      textInputAction: Props.toInputAction(p['textInputAction']),
+      textCapitalization: Props.toTextCapitalization(p['textCapitalization']),
+      textAlign: Props.toTextAlign(p['textAlign']),
+      style: Props.toTextStyle(p),
+      cursorColor: p.color('cursorColor'),
+      cursorWidth: p.n('cursorWidth') ?? 2.0,
+      cursorHeight: p.n('cursorHeight'),
+      cursorRadius: p.n('cursorRadius') != null ? Radius.circular(p.n('cursorRadius')!) : null,
+      showCursor: p.has('showCursor') ? p.b('showCursor', true) : null,
+      autofocus: p.b('autofocus'),
+      obscureText: obscure,
+      autocorrect: p.b('autocorrect', true),
+      enableSuggestions: p.b('enableSuggestions', true),
+      maxLines: obscure ? 1 : p.i('maxLines'),
+      minLines: p.i('minLines'),
+      maxLength: p.i('maxLength'),
+      readOnly: p.b('readOnly'),
+      enabled: p.b('enabled', true),
+      enableInteractiveSelection:
+          p.has('enableInteractiveSelection') ? p.b('enableInteractiveSelection', true) : null,
+      onChanged: widget.onChanged,
+      onSubmitted: widget.onSubmitted,
+    );
+  }
 }
 
 class BridgeBottomNav extends StatefulWidget {
@@ -1681,27 +2298,43 @@ class _BridgeBottomNavState extends State<BridgeBottomNav> {
 }
 
 class BridgeDropdown extends StatefulWidget {
-  const BridgeDropdown({super.key, this.initial, required this.items, required this.onChanged});
-  final String? initial;
-  final List<dynamic> items;
+  const BridgeDropdown({super.key, required this.p, required this.onChanged});
+  final Props p;
   final ValueChanged<String?> onChanged;
   @override
   State<BridgeDropdown> createState() => _BridgeDropdownState();
 }
 
 class _BridgeDropdownState extends State<BridgeDropdown> {
-  late String? _value = widget.initial;
+  late String? _value = widget.p.s('value');
   @override
   void didUpdateWidget(BridgeDropdown old) {
     super.didUpdateWidget(old);
-    if (widget.initial != old.initial) setState(() => _value = widget.initial);
+    if (widget.p.s('value') != old.p.s('value')) setState(() => _value = widget.p.s('value'));
   }
   @override
   Widget build(BuildContext context) {
+    final p = widget.p;
     return DropdownButton<String>(
       value: _value,
-      items: Renderer._dropdownItems(widget.items),
-      onChanged: (v) { setState(() => _value = v); widget.onChanged(v); },
+      items: Renderer._dropdownItems(p['items']),
+      isExpanded: p.b('isExpanded'),
+      isDense: p.b('isDense'),
+      icon: p['icon'] != null ? Icon(Props.toIcon(p['icon'])) : null,
+      iconSize: p.n('iconSize') ?? 24,
+      iconDisabledColor: p.color('iconDisabledColor'),
+      iconEnabledColor: p.color('iconEnabledColor'),
+      elevation: p.i('elevation') ?? 8,
+      style: Props.toTextStyle(p),
+      alignment: p.align('alignment') ?? AlignmentDirectional.centerStart,
+      dropdownColor: p.color('dropdownColor'),
+      hint: p['hint'] != null ? Text(p['hint'].toString()) : null,
+      focusColor: p.color('focusColor'),
+      borderRadius: Props.toBorderRadius(p['borderRadius'] ?? p['radius']),
+      itemHeight: p.n('itemHeight'),
+      onChanged: p.b('enabled', true)
+          ? (v) { setState(() => _value = v); widget.onChanged(v); }
+          : null,
     );
   }
 }
@@ -1964,6 +2597,40 @@ class _BridgeNavigationBarState extends State<BridgeNavigationBar> {
           label: (ip['label'] ?? ip['text'] ?? '').toString(),
         );
       }).toList(),
+    );
+  }
+}
+
+class BridgePageView extends StatefulWidget {
+  const BridgePageView({super.key, required this.p, required this.children, this.onChanged});
+  final Props p;
+  final List<Widget> children;
+  final ValueChanged<int>? onChanged;
+  @override
+  State<BridgePageView> createState() => _BridgePageViewState();
+}
+
+class _BridgePageViewState extends State<BridgePageView> {
+  late final PageController _controller =
+      PageController(initialPage: widget.p.i('initialPage') ?? widget.p.i('page') ?? 0);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    return PageView(
+      controller: _controller,
+      scrollDirection: p.axis('scrollDirection'),
+      reverse: p.b('reverse'),
+      pageSnapping: p.b('pageSnapping', true),
+      physics: Props.toPhysics(p['physics']),
+      onPageChanged: (i) => widget.onChanged?.call(i),
+      children: widget.children,
     );
   }
 }
