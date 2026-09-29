@@ -5,7 +5,7 @@
 local layout = {
   Column, gap = 12, padding = 24,
   { Text, text = "点下面的按钮", fontSize = 16 },
-  { Button, text = "4664", id = "h", width = "fill" },
+  { ElevatedButton, text = "4664", id = "h", width = "fill" },
 }
 
 activity.setContentView(渲染Flutter(layout))

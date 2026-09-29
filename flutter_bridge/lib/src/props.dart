@@ -1,4 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+
+/// Props 缓存条目：保存原始对象引用，避免 identityHashCode 碰撞时误用。
+class _PropsCacheEntry {
+  _PropsCacheEntry(this.raw, this.props);
+  final Object raw;
+  final Props props;
+}
 
 /// 属性别名：把 Lua 侧常见别名统一到规范键。规范的 Flutter 属性名保持不变。
 const Map<String, String> kPropAliases = {
@@ -17,9 +26,10 @@ const Map<String, String> kPropAliases = {
   'borderRadius': 'radius',
   'cornerRadius': 'radius',
   'spacing': 'gap',
-  'value': 'text',
   'bg': 'backgroundColor',
-  'fillColor': 'color',
+  // 注意：不再把 'value' -> 'text'、'fillColor' -> 'color' 全局别名化。
+  // Slider/Checkbox/Dropdown 等控件的 value/fillColor 语义与 Text/Container 不同，
+  // 全局映射会跨控件污染，改由各控件显式读取。
 };
 
 /// 统一属性处理器：所有控件都通过它读取属性。
@@ -34,9 +44,42 @@ class Props {
 
   final Map<String, dynamic> map;
 
-  static Props of(dynamic raw) => Props._(normalize(raw));
+  /// Props 缓存：normalize 要新建 Map 并拷贝所有键，是每节点每次 render 的热路径。
+  /// 用 identityHashCode 作 key，并校验 raw 仍是同一对象（防 hash 碰撞）——
+  /// 只要调用方不修改传入的 Map（渲染器只读），缓存就是安全的。
+  static final Map<int, _PropsCacheEntry> _cache = {};
+  static const int _cacheLimit = 512;
+
+  static Props of(dynamic raw) {
+    if (raw is Map) {
+      final id = identityHashCode(raw);
+      final hit = _cache[id];
+      if (hit != null && identical(hit.raw, raw)) return hit.props;
+      final props = Props._(normalize(raw));
+      _cache[id] = _PropsCacheEntry(raw, props);
+      if (_cache.length > _cacheLimit) {
+        // 简易 LRU：Map 保持插入顺序，踢掉最早的一批
+        final drop = _cache.keys.take(_cache.length - _cacheLimit).toList();
+        for (final k in drop) {
+          _cache.remove(k);
+        }
+      }
+      return props;
+    }
+    return Props._(normalize(raw));
+  }
+
+  /// 清空缓存（测试或需要强制重解析时用）。
+  static void clearCache() => _cache.clear();
 
   /// 兼容两种节点写法，并把别名键写回规范键。
+  ///
+  /// 识别规则（按顺序）：
+  ///  1. 规范化节点：有 `type`（或 `t`）字段，直接用；`props` 子表会被展平；
+  ///  2. AndroLua 表风格：`{ Widget名, k = v, {子1}, {子2}, ... }`，即首元素是控件名，
+  ///     数字下标 ≥2 的项是子节点，其余键值对是属性——会把 `"1"` 换成 `type`，
+  ///     并把数字下标的项按序号收集进 `children`；
+  ///  3. 其余情况原样使用（可能没有 type，渲染时会走降级分支）。
   static Map<String, dynamic> normalize(dynamic raw) {
     final m = <String, dynamic>{};
     if (raw is Map) {
@@ -150,8 +193,10 @@ class Props {
   static double? dim(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
-    final s = v.toString().toLowerCase();
+    var s = v.toString().toLowerCase().trim();
     if (s == 'fill' || s == 'match' || s == 'match_parent') return double.infinity;
+    // 兼容 Android 习惯的单位后缀：16dp / 16sp / 16px
+    s = s.replaceAll(RegExp(r'(dp|dip|sp|px)$'), '');
     return double.tryParse(s);
   }
 
@@ -167,6 +212,8 @@ class Props {
 
   static Color? toColor(dynamic v) {
     if (v == null) return null;
+    // 注意：int 按 ARGB（0xAARRGGBB）解释，不是 RGB。Lua 里写 0xFF0000 会变成不透明蓝。
+    // 想要 RGB 请用字符串 '#FF0000'。
     if (v is int) return Color(v);
     if (v is! String) return null;
     final named = {
@@ -179,6 +226,10 @@ class Props {
     final lower = v.toLowerCase();
     if (named.containsKey(lower)) return named[lower];
     var hex = lower.replaceFirst('#', '').replaceFirst('0x', '');
+    // 支持 CSS 简写：#abc -> #aabbcc
+    if (hex.length == 3 || hex.length == 4) {
+      hex = hex.split('').map((c) => '$c$c').join();
+    }
     if (hex.length == 6) hex = 'ff$hex';
     if (hex.length == 8) {
       final value = int.tryParse(hex, radix: 16);
@@ -187,11 +238,27 @@ class Props {
     return null;
   }
 
+  static double? _len(dynamic v) {
+    if (v is num) return v.toDouble();
+    if (v is String) {
+      final s = v.toLowerCase().trim().replaceAll(RegExp(r'(dp|dip|sp|px)$'), '');
+      return double.tryParse(s);
+    }
+    return null;
+  }
+
+  /// 边距：num / [全] / [垂直, 水平] / [左上右下] / {left,top,right,bottom}。
+  /// 注意 [垂直, 水平] 的顺序沿用 AndroLua/Android 习惯（不是 CSS 的 [水平, 垂直]）。
   static EdgeInsets? toInsets(dynamic v) {
     if (v == null) return null;
     if (v is num) return EdgeInsets.all(v.toDouble());
+    if (v is String) {
+      final n = _len(v);
+      return n == null ? null : EdgeInsets.all(n);
+    }
     if (v is List) {
-      final n = v.map((e) => (e as num).toDouble()).toList();
+      // 用 _len 容错：元素可能是字符串（如 ['10', '20'] / ['8dp']），旧代码直接 as num 会崩
+      final n = v.map(_len).whereType<double>().toList();
       if (n.length == 1) return EdgeInsets.all(n[0]);
       if (n.length == 2) return EdgeInsets.symmetric(vertical: n[0], horizontal: n[1]);
       if (n.length == 4) return EdgeInsets.fromLTRB(n[0], n[1], n[2], n[3]);
@@ -360,15 +427,16 @@ class Props {
   static BorderStyle toBorderStyle(dynamic v) =>
       v?.toString().toLowerCase() == 'none' ? BorderStyle.none : BorderStyle.solid;
 
-  /// 形状：circle / stadium / beveled / rounded（默认）；radius 作为 rounded 的圆角。
+  /// 形状：circle / stadium / beveled / rounded（默认）。
+  /// 传了名字但识别不出时退回 rounded（避免“设置了但没生效”的困惑）；完全不传返回 null。
   static OutlinedBorder? toShape(dynamic v, [double? radius]) {
-    switch (v?.toString().toLowerCase()) {
+    if (v == null) return null;
+    switch (v.toString().toLowerCase()) {
       case 'circle': return const CircleBorder();
       case 'stadium':
       case 'pill': return const StadiumBorder();
       case 'beveled': return BeveledRectangleBorder(borderRadius: BorderRadius.circular(radius ?? 0));
-      case 'rounded': return RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius ?? 4));
-      default: return null;
+      default: return RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius ?? 4));
     }
   }
 
@@ -442,6 +510,19 @@ class Props {
         center: toAlignment(m['center']) ?? Alignment.center,
       );
     }
+    // 角度：支持 angle（度），从 12 点方向顺时针。不传则用 begin/end。
+    final angle = toNum(m['angle']);
+    if (angle != null) {
+      final rad = angle * math.pi / 180.0;
+      final dx = math.sin(rad) / 2.0;
+      final dy = -math.cos(rad) / 2.0;
+      return LinearGradient(
+        colors: colors,
+        stops: stops.isEmpty ? null : stops,
+        begin: Alignment(-dx, -dy),
+        end: Alignment(dx, dy),
+      );
+    }
     return LinearGradient(
       colors: colors,
       stops: stops.isEmpty ? null : stops,
@@ -450,17 +531,7 @@ class Props {
     );
   }
 
-  static Gradient? toGradient(dynamic v) {
-    if (v is! Map) return null;
-    final m = v.cast<String, dynamic>();
-    final colors = toList(m['colors']).map((c) => toColor(c)).whereType<Color>().toList();
-    if (colors.isEmpty) return null;
-    return LinearGradient(
-      colors: colors,
-      begin: toAlignment(m['begin']) ?? Alignment.topLeft,
-      end: toAlignment(m['end']) ?? Alignment.bottomRight,
-    );
-  }
+  static Gradient? toGradient(dynamic v) => toAnyGradient(v);
 
   static BoxBorder? toBorder(dynamic v) {
     if (v is Map) {
@@ -546,6 +617,14 @@ class Props {
       case 'solid': return TextDecorationStyle.solid;
       default: return null;
     }
+  }
+
+  /// 日期解析：支持 ISO 字符串 / 毫秒时间戳 / DateTime。
+  static DateTime? toDate(dynamic v) {
+    if (v == null) return null;
+    if (v is DateTime) return v;
+    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+    return DateTime.tryParse(v.toString());
   }
 
   static TextDecoration? toTextDecoration(dynamic v) {
@@ -637,6 +716,7 @@ class Props {
   static IconData toIcon(dynamic name) {
     final key = name?.toString().toLowerCase();
     if (key == null) return Icons.widgets;
-    return icons[key] ?? Icons.widgets;
+    // 未知名：开发时用问号图标，一眼能看出是名字写错了（方块图标容易误认为故意用的）
+    return icons[key] ?? Icons.help_outline;
   }
 }

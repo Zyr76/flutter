@@ -43,16 +43,16 @@ local function 页面()
         -- ============ 图表 ============
         标题("图表 Chart（折线 / 柱状 / 饼图）"),
         间隔(),
-        { Chart, chartType = "line", height = 200, series = {
+        { LineChart, height = 200, series = {
           { name = "本周", color = "#3F51B5",
             points = { { x = 0, y = 3 }, { x = 1, y = 5 }, { x = 2, y = 2 }, { x = 3, y = 6 }, { x = 4, y = 4 }, { x = 5, y = 7 } } },
         } },
-        { Chart, chartType = "bar", height = 200, series = {
+        { BarChart, height = 200, series = {
           { name = "A", color = "#FF9800", value = 6 },
           { name = "B", color = "#4CAF50", value = 9 },
           { name = "C", color = "#2196F3", value = 4 },
         } },
-        { Chart, chartType = "pie", height = 200, series = {
+        { PieChart, height = 200, series = {
           { name = "安卓", color = "#3F51B5", value = 40 },
           { name = "iOS", color = "#009688", value = 35 },
           { name = "其它", color = "#FF9800", value = 25 },
@@ -102,9 +102,9 @@ local function 页面()
         -- ============ Dart 逻辑 ============
         标题("调用 Dart 逻辑"),
         间隔(),
-        { Button, text = "调用 Dart：fetchOrders(page=1, size=5)", width = "fill",
+        { ElevatedButton, text = "调用 Dart：fetchOrders(page=1, size=5)", width = "fill",
           onClick = { call = "fetchOrders", args = { page = 1, size = 5 } } },
-        { Button, text = "调用 Dart：httpGet(https://httpbin.org/get)", width = "fill",
+        { ElevatedButton, text = "调用 Dart：httpGet(https://httpbin.org/get)", width = "fill",
           onClick = { call = "httpGet", args = { url = "https://httpbin.org/get" } } },
         { SizedBox, height = 24 },
       },

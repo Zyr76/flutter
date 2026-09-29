@@ -16,7 +16,7 @@ local layout = {
   orientation = "vertical",
   { TextView, id = "hint", text = "↑ 原生 TextView：由 loadlayout 创建" },
   { FrameLayout, id = "flutterHost", layout_width = "fill", layout_height = 0, layout_weight = 1 },
-  { Button, id = "nativeBtn", text = "native Button：dartCall('getUserInfo')" },
+  { ElevatedButton, id = "nativeBtn", text = "native Button：dartCall('getUserInfo')" },
 }
 activity.setContentView(loadlayout(layout))
 hint.setPadding(24, 24, 24, 24)

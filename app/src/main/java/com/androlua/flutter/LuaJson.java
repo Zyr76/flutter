@@ -331,7 +331,7 @@ public final class LuaJson {
     static {
         String[] names = {
                 "Column", "Row", "Stack", "Container", "Padding", "Center", "Expanded",
-                "SizedBox", "Spacer", "Text", "SelectableText", "Button", "ElevatedButton",
+                "SizedBox", "Spacer", "Text", "SelectableText", "ElevatedButton",
                 "TextButton", "FilledButton", "OutlinedButton", "IconButton", "FloatingActionButton",
                 "Icon", "Image", "Card", "ListView", "GridView", "Wrap", "Align", "AspectRatio",
                 "ClipRRect", "Opacity", "SafeArea", "Positioned", "CircleAvatar", "Chip",
@@ -343,13 +343,13 @@ public final class LuaJson {
                 "DefaultTabController", "SingleChildScrollView", "InkWell", "GestureDetector",
                 "Transform", "FractionallySizedBox", "DropdownButton", "DropdownButtonFormField",
                 // 二维码 / 地图 / 图表 / 媒体
-                "QrCode", "QrImage", "FlutterMap", "Map", "Chart", "LineChart", "BarChart", "PieChart",
-                "VideoPlayer", "Video", "AudioPlayer", "Audio",
+                "QrCode", "QrImageView", "FlutterMap", "LineChart", "BarChart", "PieChart",
+                "VideoPlayer", "AudioPlayer",
                 // 反馈 / 更多 Material 控件 / 日期 / 动画
                 "Tooltip", "Badge", "Placeholder", "RefreshIndicator",
                 "SwitchListTile", "CheckboxListTile", "RadioListTile", "Radio",
                 "ExpansionTile", "Stepper", "DataTable",
-                "CalendarDatePicker", "DatePicker",
+                "CalendarDatePicker",
                 "AnimatedOpacity", "AnimatedContainer",
                 // 布局/包装/装饰
                 "Material", "DecoratedBox", "ColoredBox", "ConstrainedBox",
@@ -374,9 +374,8 @@ public final class LuaJson {
         for (String n : names) {
             TYPES.put(n, n);
         }
-        // 少量兼容别名（Android 常用名 -> Flutter 控件）
-        TYPES.put("EditText", "TextField");
-        TYPES.put("Android", "AndroidView");
+        // 不再提供 Android 风格名（如 EditText/Android）到 Flutter 名的别名——
+        // Lua 侧写 UI 一律使用 Flutter 自己的控件名。
     }
 
     static String widgetType(Object head) {
@@ -390,13 +389,16 @@ public final class LuaJson {
         return resolveTypeName(name);
     }
 
-    /** 控件名归一：全限定类名 / 带 View·Layout 后缀的 Android 类名 -> Flutter 控件名。 */
+    /**
+     * 控件名归一：去掉 "class " 前缀与包名（如 android.widget.TextView -> TextView），
+     * 然后用 TYPES 精确命中；命中不了就原样返回（渲染时会走未知控件的降级分支）。
+     *
+     * <p>刻意不做 Android 风格名到 Flutter 名的翻译（不再把 LinearLayout 拆成 Linear 之类）——
+     * Lua 侧写 UI 必须用 Flutter 自己的控件名。
+     */
     private static String resolveTypeName(String s) {
         if (s == null || s.isEmpty()) {
             return "Container";
-        }
-        if (TYPES.containsKey(s)) {
-            return TYPES.get(s);
         }
         String simple = s;
         if (simple.startsWith("class ")) {
@@ -406,18 +408,8 @@ public final class LuaJson {
         if (dot >= 0) {
             simple = simple.substring(dot + 1);
         }
-        if (TYPES.containsKey(simple)) {
-            return TYPES.get(simple);
-        }
-        for (String suffix : new String[]{"View", "Layout", "Widget"}) {
-            if (simple.endsWith(suffix) && simple.length() > suffix.length()) {
-                String base = simple.substring(0, simple.length() - suffix.length());
-                if (TYPES.containsKey(base)) {
-                    return TYPES.get(base);
-                }
-            }
-        }
-        return simple.isEmpty() ? "Container" : simple;
+        String hit = TYPES.get(simple);
+        return hit != null ? hit : simple;
     }
 
     // ============================================================

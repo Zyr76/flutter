@@ -30,10 +30,12 @@ class Renderer {
   /// 兜底用的 Scaffold key（便于 Lua 通过 Dart 方法打开抽屉）。
   static final GlobalKey<ScaffoldState> scaffoldKey = GlobalKey<ScaffoldState>();
 
-  /// 自定义控件扩展点：名字 -> 构建函数（参数为该节点的属性表）。
-  static final Map<String, Widget Function(Map<String, dynamic>)> custom = {};
+  /// 自定义控件扩展点：名字 -> 构建函数。
+  /// 新签名：[Widget Function(Props p, List<Widget> children)]（能拿到归一化属性与子节点）；
+  /// 旧签名 [Widget Function(Map<String, dynamic> props)] 仍然兼容。
+  static final Map<String, Function> custom = {};
 
-  static void register(String type, Widget Function(Map<String, dynamic>) builder) {
+  static void register(String type, Function builder) {
     custom[type.toLowerCase()] = builder;
   }
 
@@ -52,7 +54,18 @@ class Renderer {
   // 节点构建
   // ============================================================
 
+  /// 当前递归深度，用于防止 Lua 侧构造带环的 spec 导致栈溢出。
+  static int _depth = 0;
+  static const int _maxDepth = 200;
+
   static Widget? _build(dynamic spec, String path) {
+    if (_depth >= _maxDepth) {
+      return const Padding(
+        padding: EdgeInsets.all(4),
+        child: Text('⚠ 节点嵌套过深（可能存在环）', style: TextStyle(color: Colors.red, fontSize: 11)),
+      );
+    }
+    _depth++;
     try {
       return _buildInner(spec, path);
     } catch (e) {
@@ -60,6 +73,8 @@ class Renderer {
         padding: const EdgeInsets.all(4),
         child: Text('⚠ 节点渲染失败: $e', style: const TextStyle(color: Colors.red, fontSize: 11)),
       );
+    } finally {
+      _depth--;
     }
   }
 
@@ -100,7 +115,13 @@ class Renderer {
 
     final ext = custom[p.type];
     if (ext != null) {
-      return _wrapCommon(ext(p.map), p);
+      Widget? w;
+      if (ext is Widget Function(Props, List<Widget>)) {
+        w = ext(p, children);
+      } else if (ext is Widget Function(Map<String, dynamic>)) {
+        w = ext(p.map);
+      }
+      if (w != null) return _wrapCommon(w, p);
     }
 
     Widget result;
@@ -285,7 +306,7 @@ class Renderer {
         break;
 
       // ---------- 按钮 ----------
-      case 'button' || 'elevatedbutton' || 'textbutton' || 'filledbutton' || 'outlinedbutton':
+      case 'elevatedbutton' || 'textbutton' || 'filledbutton' || 'outlinedbutton':
         final label = (p['text'] ?? p['label'] ?? 'Button').toString();
         Widget child = _widgetOrText(p['child'], label, '$path/child');
         if (p['icon'] != null) {
@@ -409,13 +430,14 @@ class Renderer {
         break;
 
       // ---------- 滚动 / 列表 ----------
-      case 'listview' || 'list' || 'listviewbuilder':
+      case 'listview':
         result = _listView(p, children, path);
         break;
       case 'gridview':
         final gCount = p.i('itemCount');
         final gTemplate = p['itemTemplate'] ?? p['item'];
         final gUseBuilder = gTemplate != null && gCount != null && gCount > 0;
+        final gNeedsSubst = gUseBuilder && _hasTemplateVar(gTemplate);
         result = GridView.builder(
           padding: p.inset('padding'),
           scrollDirection: p.axis('scrollDirection'),
@@ -430,7 +452,7 @@ class Renderer {
           ),
           itemCount: gUseBuilder ? gCount : children.length,
           itemBuilder: (ctx, i) => gUseBuilder
-              ? (_build(_subst(gTemplate, i), '$path/$i') ?? const SizedBox.shrink())
+              ? (_build(gNeedsSubst ? _subst(gTemplate, i) : gTemplate, '$path/$i') ?? const SizedBox.shrink())
               : children[i],
         );
         break;
@@ -501,7 +523,7 @@ class Renderer {
           onChanged: (v) => _change(p, v),
         );
         break;
-      case 'textfield' || 'edittext' || 'textformfield':
+      case 'textfield' || 'textformfield':
         result = BridgeTextField(
           key: _nodeKey(p, path),
           p: p,
@@ -635,7 +657,7 @@ class Renderer {
         break;
 
       // ---------- 二维码 / 地图 / 图表 / 媒体 ----------
-      case 'qrcode' || 'qrimage' || 'qr':
+      case 'qrcode' || 'qrimageview':
         result = QrImageView(
           data: (p['data'] ?? p['text'] ?? '').toString(),
           size: p.n('size'),
@@ -644,13 +666,13 @@ class Renderer {
           dataModuleStyle: QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: p.color('color') ?? Colors.black),
         );
         break;
-      case 'map' || 'fluttermap':
+      case 'fluttermap':
         result = _mapView(p);
         break;
-      case 'chart' || 'linechart' || 'barchart' || 'piechart':
+      case 'linechart' || 'barchart' || 'piechart':
         result = _chart(p);
         break;
-      case 'videoplayer' || 'video':
+      case 'videoplayer':
         result = BridgeVideo(
           url: (p['url'] ?? p['src'] ?? '').toString(),
           autoPlay: p.b('autoPlay'),
@@ -658,7 +680,7 @@ class Renderer {
           showControls: p.b('controls', true),
         );
         break;
-      case 'audioplayer' || 'audio' || 'music':
+      case 'audioplayer':
         result = BridgeAudio(
           url: (p['url'] ?? p['src'] ?? '').toString(),
           title: p.s('title') ?? p.s('text'),
@@ -794,7 +816,7 @@ class Renderer {
         break;
 
       // ---------- 日期 ----------
-      case 'calendardatepicker' || 'datepicker':
+      case 'calendardatepicker':
         final now = DateTime.now();
         final first = _parseDate(p['firstDate']) ?? DateTime(now.year - 1, now.month, now.day);
         final last = _parseDate(p['lastDate']) ?? DateTime(now.year + 1, now.month, now.day);
@@ -1138,6 +1160,7 @@ class Renderer {
         final rCount = p.i('itemCount');
         final rTemplate = p['itemTemplate'] ?? p['item'];
         if (rTemplate != null && rCount != null && rCount > 0) {
+          final rNeedsSubst = _hasTemplateVar(rTemplate);
           result = ReorderableListView.builder(
             padding: p.inset('padding'),
             physics: Props.toPhysics(p['physics']),
@@ -1146,7 +1169,7 @@ class Renderer {
             itemCount: rCount,
             itemBuilder: (ctx, i) => KeyedSubtree(
               key: ValueKey('$path/ri$i'),
-              child: _build(_subst(rTemplate, i), '$path/$i') ?? const SizedBox.shrink(),
+              child: _build(rNeedsSubst ? _subst(rTemplate, i) : rTemplate, '$path/$i') ?? const SizedBox.shrink(),
             ),
             onReorderItem: (a, b) => _emit(p['onReorder'], {'oldIndex': a, 'newIndex': b}, fallback: p.map),
           );
@@ -1327,7 +1350,6 @@ class Renderer {
 
       // ---------- 原生 ----------
       case 'androidview':
-      case 'android':
         result = AndroidView(
           viewType: (p['viewType'] ?? p['view'] ?? 'androlua/native').toString(),
           layoutDirection: TextDirection.ltr,
@@ -1368,7 +1390,8 @@ class Renderer {
     final count = p.i('itemCount');
     final template = p['itemTemplate'] ?? p['item'];
     if (template != null && count != null && count > 0) {
-      // 模板式懒加载：按需构建，字符串里的 $index 会替换成当前下标。
+      final needsSubst = _hasTemplateVar(template);
+      // 模板式懒加载：按需构建；模板含 $index/$i 时才逐项替换（否则直接用原引用）。
       return ListView.builder(
         padding: padding,
         physics: physics,
@@ -1381,7 +1404,8 @@ class Renderer {
         addRepaintBoundaries: p.b('addRepaintBoundaries', true),
         keyboardDismissBehavior: keyboardDismiss,
         itemCount: count,
-        itemBuilder: (ctx, i) => _build(_subst(template, i), '$path/$i') ?? const SizedBox.shrink(),
+        itemBuilder: (ctx, i) =>
+            _build(needsSubst ? _subst(template, i) : template, '$path/$i') ?? const SizedBox.shrink(),
       );
     }
     return ListView.builder(
@@ -1412,6 +1436,14 @@ class Renderer {
     return v;
   }
 
+  /// 模板里是否真的含 `$index`/`$i`。不含时不必逐项深拷贝（长列表是热路径）。
+  static bool _hasTemplateVar(dynamic v) {
+    if (v is String) return v.contains(r'$index') || v.contains(r'$i');
+    if (v is List) return v.any(_hasTemplateVar);
+    if (v is Map) return v.values.any(_hasTemplateVar);
+    return false;
+  }
+
   // ============================================================
   // 地图 / 图表
   // ============================================================
@@ -1425,42 +1457,116 @@ class Renderer {
       final mp = Props.of(m);
       markers.add(Marker(
         point: LatLng(mp.n('lat') ?? 0, mp.n('lng') ?? 0),
-        width: 40,
-        height: 40,
+        width: mp.n('width') ?? 40,
+        height: mp.n('height') ?? 40,
         child: Icon(Props.toIcon(mp['icon'] ?? 'location_on'), color: Colors.red, size: 32),
       ));
     }
+
+    final polylines = <Polyline>[];
+    for (final pl in p.list('polylines')) {
+      final pp = Props.of(pl);
+      final pts = _latLngList(pp.list('points'));
+      if (pts.length >= 2) {
+        polylines.add(Polyline(
+          points: pts,
+          strokeWidth: pp.n('strokeWidth') ?? 3,
+          color: pp.color('color') ?? Colors.blue,
+        ));
+      }
+    }
+
+    final polygons = <Polygon>[];
+    for (final pg in p.list('polygons')) {
+      final gp = Props.of(pg);
+      final pts = _latLngList(gp.list('points'));
+      if (pts.length >= 3) {
+        final c = gp.color('color') ?? Colors.blue;
+        polygons.add(Polygon(
+          points: pts,
+          color: c.withValues(alpha: gp.n('opacity') ?? 0.3),
+          borderColor: gp.color('borderColor') ?? c,
+          borderStrokeWidth: gp.n('borderStrokeWidth') ?? 2,
+        ));
+      }
+    }
+
+    final circles = <CircleMarker>[];
+    for (final c in p.list('circles')) {
+      final cp2 = Props.of(c);
+      final cColor = cp2.color('color') ?? Colors.blue;
+      circles.add(CircleMarker(
+        point: LatLng(cp2.n('lat') ?? cp2.n('latitude') ?? 0, cp2.n('lng') ?? cp2.n('longitude') ?? 0),
+        radius: cp2.n('radius') ?? 200,
+        color: cColor.withValues(alpha: cp2.n('opacity') ?? 0.2),
+        borderColor: cp2.color('borderColor') ?? cColor,
+        borderStrokeWidth: cp2.n('borderStrokeWidth') ?? 2,
+      ));
+    }
+
     final tile = p.s('tileUrl') ?? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
     return FlutterMap(
       options: MapOptions(
         initialCenter: LatLng(lat, lng),
         initialZoom: p.n('zoom') ?? 13,
+        minZoom: p.n('minZoom'),
+        maxZoom: p.n('maxZoom'),
       ),
       children: [
         TileLayer(
           urlTemplate: tile,
           userAgentPackageName: p.s('userAgent') ?? 'com.androlua',
         ),
+        if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
+        if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
+        if (circles.isNotEmpty) CircleLayer(circles: circles),
         if (markers.isNotEmpty) MarkerLayer(markers: markers),
       ],
     );
   }
 
+  /// `[ {lat,lng}, ... ]` 或 `[[lat,lng], ...]` -> `List<LatLng>`
+  static List<LatLng> _latLngList(List<dynamic> raw) {
+    final out = <LatLng>[];
+    for (final e in raw) {
+      if (e is List && e.length >= 2) {
+        out.add(LatLng(Props.toNum(e[0]) ?? 0, Props.toNum(e[1]) ?? 0));
+      } else {
+        final ep = Props.of(e);
+        out.add(LatLng(ep.n('lat') ?? ep.n('latitude') ?? 0, ep.n('lng') ?? ep.n('longitude') ?? 0));
+      }
+    }
+    return out;
+  }
+
   static Widget _chart(Props p) {
-    final height = p.n('height') ?? 220;
+    final height = p.n('height');
     final series = p.list('series').map(_Series.of).toList();
-    final kind = p.type == 'chart' ? (p.s('chartType') ?? 'line').toLowerCase() : p.type;
+    final kind = p.type;
 
     Widget body;
     switch (kind) {
       case 'bar' || 'barchart':
+        // 分组柱：groups = [ { values: [1,2], colors: ['#f00','#0f0'] }, ... ]；
+        // 不传 groups 时沿用 series（一个 x 一根柱）。
+        final groups = p.list('groups');
         body = BarChart(BarChartData(
-          barGroups: [
-            for (var i = 0; i < series.length; i++)
-              BarChartGroupData(x: i, barRods: [
-                BarChartRodData(toY: series[i].value, color: series[i].color, width: 14, borderRadius: BorderRadius.circular(4)),
-              ]),
-          ],
+          barGroups: groups.isNotEmpty
+              ? [
+                  for (var i = 0; i < groups.length; i++)
+                    BarChartGroupData(x: i, barRods: _barRods(Props.of(groups[i]), series)),
+                ]
+              : [
+                  for (var i = 0; i < series.length; i++)
+                    BarChartGroupData(x: i, barRods: [
+                      BarChartRodData(
+                        toY: series[i].value,
+                        color: series[i].color,
+                        width: 14,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ]),
+                ],
           gridData: const FlGridData(show: true),
           borderData: FlBorderData(show: false),
         ));
@@ -1489,16 +1595,76 @@ class Renderer {
           borderData: FlBorderData(show: false),
         ));
     }
-    return SizedBox(height: height, child: body);
+    // height 未传时不包 SizedBox，交给外层约束（旧实现硬编码 220 会无视外层高度）
+    return height == null ? body : SizedBox(height: height, child: body);
+  }
+
+  /// 分组柱的一根组：优先读 values/colors，否则按 name 从 series 取值。
+  static List<BarChartRodData> _barRods(Props gp, List<_Series> series) {
+    final values = gp.list('values');
+    final colors = gp.list('colors');
+    if (values.isNotEmpty) {
+      return [
+        for (var j = 0; j < values.length; j++)
+          BarChartRodData(
+            toY: Props.toNum(values[j]) ?? 0,
+            color: Props.toColor(colors.length > j ? colors[j] : null) ?? Colors.blue,
+            width: gp.n('barWidth') ?? 12,
+            borderRadius: BorderRadius.circular(4),
+          ),
+      ];
+    }
+    final names = gp.list('series');
+    if (names.isNotEmpty) {
+      final rods = <BarChartRodData>[];
+      for (final n in names) {
+        final s = series.firstWhere(
+          (e) => e.name == n.toString(),
+          orElse: () => _Series(null, Colors.blue, 0, const []),
+        );
+        rods.add(BarChartRodData(
+          toY: s.value,
+          color: s.color,
+          width: gp.n('barWidth') ?? 12,
+          borderRadius: BorderRadius.circular(4),
+        ));
+      }
+      return rods;
+    }
+    return [
+      BarChartRodData(
+        toY: gp.n('value') ?? 0,
+        color: gp.color('color') ?? Colors.blue,
+        width: gp.n('barWidth') ?? 12,
+        borderRadius: BorderRadius.circular(4),
+      ),
+    ];
   }
 
   // ============================================================
   // 通用结构/属性
   // ============================================================
 
+  /// 节点通用包装：visible / opacity / margin / tooltip / weight / width-height。
+  /// 自己会处理这些属性的控件列在 _no*Wrap 里，避免重复注入。
   static Widget _wrapCommon(Widget child, Props p) {
-    final weight = p.n('weight');
     Widget out = child;
+    if (!_noVisibilityWrap.contains(p.type) && p.has('visible')) {
+      out = Visibility(visible: p.b('visible', true), child: out);
+    }
+    if (!_noOpacityWrap.contains(p.type) && p.has('opacity')) {
+      final o = (p.n('opacity') ?? 1.0).clamp(0.0, 1.0);
+      if (o < 1.0) out = Opacity(opacity: o, child: out);
+    }
+    if (!_noMarginWrap.contains(p.type) && p.has('margin')) {
+      final m = p.inset('margin');
+      if (m != null) out = Padding(padding: m, child: out);
+    }
+    if (!_noTooltipWrap.contains(p.type) && p.has('tooltip')) {
+      final t = p.s('tooltip');
+      if (t != null && t.isNotEmpty) out = Tooltip(message: t, child: out);
+    }
+    final weight = p.n('weight');
     if (weight != null) {
       out = Expanded(flex: weight.round(), child: out);
     }
@@ -1510,11 +1676,25 @@ class Renderer {
     return out;
   }
 
+  // 下列控件自己会处理对应属性，_wrapCommon 跳过，避免重复包装。
+  static const Set<String> _noVisibilityWrap = {'visibility', 'offstage'};
+  static const Set<String> _noOpacityWrap = {'opacity', 'animatedopacity', 'animatedcrossfade'};
+  static const Set<String> _noMarginWrap = {'container', 'card', 'padding', 'animatedcontainer'};
+  static const Set<String> _noTooltipWrap = {
+    'tooltip', 'iconbutton', 'floatingactionbutton', 'chip',
+    'actionchip', 'filterchip', 'choicechip', 'inputchip', 'materialbutton',
+    'button', 'elevatedbutton', 'textbutton', 'filledbutton', 'outlinedbutton',
+  };
+
   static Key? _nodeKey(Props p, String path) {
     final id = p['id'] ?? p['key'];
     if (id != null) return ValueKey('id:$id');
     // 结构路径派生的稳定 key：UI 结构不变时，StatefulWidget 的 State 能跨重建保留，
     // 让 Flutter 自身的 reconciliation 生效，避免每次 render 丢失交互状态。
+    //
+    // 说明：这里的 path 本身就是“父级 key + 序号”的递归形式（子节点为 parent/i，
+    // 插槽为 parent/槽名）。Lua 重排 children 时位置型 key 必然改变、State 无法保留——
+    // 需要跨重排保状态就给节点写 id（走上面的 id: 分支）。
     return ValueKey('path:$path');
   }
 
@@ -1574,21 +1754,11 @@ class Renderer {
   }
 
   /// 图片占位：url 缺失或加载失败时显示，避免空白。
-  static Widget _imagePlaceholder(Props p, {String? error}) {    final w = Props.dim(p['width']);
-    final h = Props.dim(p['height']);
-    final box = Container(
-      width: (w == null || w == double.infinity) ? null : w,
-      height: (h == null || h == double.infinity) ? null : h,
-      color: p.color('placeholderColor') ?? const Color(0xFFEEEEEE),
-      alignment: Alignment.center,
-      child: const Icon(Icons.broken_image, color: Colors.grey, size: 24),
-    );
-    return error == null ? box : Tooltip(message: error, child: box);
-  }
 
   /// 图片控件：统一从 src 取源，Dart 自动判定 network / data(base64) / file / asset。
   static Widget _imageWidget(Props p) {
     final src = (p['src'] ?? p['url'] ?? p['asset'] ?? p['file'])?.toString();
+    if (src == null || src.isEmpty) return const SizedBox.shrink();
     final w = Props.dim(p['width']);
     final h = Props.dim(p['height']);
     final fit = Props.toBoxFit(p['fit']);
@@ -1598,8 +1768,8 @@ class Renderer {
     final blend = Props.toBlendMode(p['colorBlendMode']);
     final quality = Props.toFilterQuality(p['filterQuality']);
     final label = p.s('semanticLabel');
-    if (src == null || src.isEmpty) return _imagePlaceholder(p);
 
+    // 加载/解码失败就静默不显示（不弹错误占位），避免干扰布局
     Widget make(ImageProvider provider) => Image(
           image: provider,
           width: w,
@@ -1611,7 +1781,7 @@ class Renderer {
           colorBlendMode: blend,
           filterQuality: quality,
           semanticLabel: label,
-          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'),
+          errorBuilder: (c, e, s) => const SizedBox.shrink(),
         );
 
     Widget img;
@@ -1619,11 +1789,11 @@ class Renderer {
       img = make(NetworkImage(src));
     } else if (src.startsWith('data:')) {
       final comma = src.indexOf(',');
-      if (comma < 0) return _imagePlaceholder(p, error: '非法 data URI');
+      if (comma < 0) return const SizedBox.shrink();
       try {
         img = make(MemoryImage(base64Decode(src.substring(comma + 1))));
-      } catch (e) {
-        return _imagePlaceholder(p, error: 'base64 解码失败: $e');
+      } catch (_) {
+        return const SizedBox.shrink();
       }
     } else if (src.startsWith('file://') || src.startsWith('/') || src.startsWith('storage/')) {
       final path = src.startsWith('file://') ? Uri.parse(src).toFilePath() : src;
@@ -1718,10 +1888,8 @@ class Renderer {
     }
   }
 
-  static DateTime? _parseDate(dynamic v) {
-    if (v == null) return null;    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
-    return DateTime.tryParse(v.toString());
-  }
+  /// 日期解析：委托给 Props.toDate（通用能力，其他地方也能用）。
+  static DateTime? _parseDate(dynamic v) => Props.toDate(v);
 
   static BoxConstraints _constraints(Props p) => BoxConstraints(
         minWidth: p.nz('minWidth'),

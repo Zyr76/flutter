@@ -19,6 +19,29 @@ void main() {
     expect((b.invoke('nope', null) as Map)['error'], contains('no such'));
   });
 
+  test('invoke 拦截不可序列化返回值（避免 MethodChannel 抛难查异常）', () {
+    final b = FlutterBridge.instance;
+    b.handlers.clear();
+    b.handlers['bad'] = (args) => const Color(0xFF000000);
+    expect((b.invoke('bad', null) as Map)['error'], contains('not serializable'));
+    b.handlers['ok'] = (args) => {'a': 1};
+    expect(b.invoke('ok', null), {'a': 1});
+  });
+
+  test('eventListeners 支持多监听 + off 取消', () {
+    final b = FlutterBridge.instance;
+    b.eventListeners.clear();
+    void l1(dynamic d) {}
+    void l2(dynamic d) {}
+    b.on('e', l1);
+    b.on('e', l2);
+    expect(b.eventListeners['e']!.length, 2);
+    b.off('e', l1);
+    expect(b.eventListeners['e']!.length, 1);
+    b.off('e');
+    expect(b.eventListeners.containsKey('e'), isFalse);
+  });
+
   testWidgets('渲染器把 JSON 描述转成 widget', (tester) async {
     final w = Renderer.build(
       '{"type":"Column","gap":4,"children":[{"type":"Text","text":"hi"},{"type":"Button","text":"go"}]}',
@@ -124,10 +147,9 @@ void main() {
     expect(find.byType(QrImageView), findsOneWidget);
   });
 
-  testWidgets('图表控件 Chart', (tester) async {
+  testWidgets('图表控件 LineChart', (tester) async {
     final w = Renderer.build(jsonEncode({
-      '1': 'Chart',
-      'chartType': 'line',
+      '1': 'LineChart',
       'height': 200,
       'series': [
         {'name': 'A', 'color': '#3F51B5', 'points': [{'x': 0, 'y': 1}, {'x': 1, 'y': 3}]},
@@ -473,5 +495,28 @@ void main() {
     expect(find.byType(Table), findsOneWidget);
     expect(find.byType(AnimatedPositioned), findsOneWidget);
     expect(find.byType(CustomScrollView, skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('ListChart 支持 groups 分组柱（不传 groups 仍兼容 series）', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'BarChart',
+      'height': 200,
+      'groups': [
+        {'values': [1, 2]},
+        {'values': [3, 4]},
+      ],
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.byType(BarChart), findsOneWidget);
+  });
+
+  testWidgets('未知控件名优雅降级，不报错', (tester) async {
+    // 控件名去别名后，非 Flutter 名（如 Button）会走降级分支
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'Button', 'text': 'x'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(tester.takeException(), isNull);
   });
 }

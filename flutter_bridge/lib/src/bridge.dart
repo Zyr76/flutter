@@ -40,8 +40,8 @@ class FlutterBridge {
   /// dartCall 的逻辑方法表：名字 -> 函数(参数 map) -> 可 JSON 序列化的返回值。
   final Map<String, dynamic Function(Map<String, dynamic>? args)> handlers = {};
 
-  /// 原生主动推来的事件监听：事件名 -> 回调。
-  final Map<String, void Function(dynamic data)> eventListeners = {};
+  /// 原生主动推来的事件监听：事件名 -> 回调列表（同名事件可多个监听，不再互相覆盖）。
+  final Map<String, List<void Function(dynamic data)>> eventListeners = {};
 
   bool _started = false;
 
@@ -207,7 +207,12 @@ class FlutterBridge {
           return null;
         }
       case 'call':
-        final args = (call.arguments as List).cast<dynamic>();
+        // 防御：空 List / 首元素不是 String 都会让旧代码直接崩
+        final rawArgs = call.arguments;
+        if (rawArgs is! List || rawArgs.isEmpty || rawArgs[0] is! String) {
+          return {'error': 'bad call arguments: $rawArgs'};
+        }
+        final args = rawArgs.cast<dynamic>();
         final name = args[0] as String;
         final raw = args.length > 1 ? args[1] : null;
         return invoke(name, decodeArgs(raw));
@@ -215,8 +220,12 @@ class FlutterBridge {
         final data = jsonDecode(call.arguments as String);
         if (data is Map) {
           final name = data['name']?.toString();
-          if (name != null && eventListeners.containsKey(name)) {
-            eventListeners[name]!(data['data']);
+          final list = name == null ? null : eventListeners[name];
+          if (list != null) {
+            // 复制一份再遍历：回调里可能增删监听
+            for (final listener in List.of(list)) {
+              listener(data['data']);
+            }
           }
         }
         return null;
@@ -262,10 +271,20 @@ class FlutterBridge {
     if (handler == null) {
       return {'error': 'no such dart method: $name'};
     }
+    dynamic res;
     try {
-      return handler(args);
+      res = handler(args);
     } catch (e) {
       return {'error': e.toString()};
+    }
+    // Future 交给 MethodChannel 层 await（原生 dartCall 会自动拿到结果）
+    if (res is Future) return res;
+    // 返回值必须能过 JSON 序列化，否则 MethodChannel 抛的异常很难排查，这里提前拦下
+    try {
+      jsonEncode(res);
+      return res;
+    } catch (e) {
+      return {'error': 'return value not serializable: $e'};
     }
   }
 
@@ -274,8 +293,17 @@ class FlutterBridge {
     channel.invokeMethod<void>('nativeEvent', jsonEncode({'name': name, 'data': data}));
   }
 
-  /// 原生 -> Flutter 事件（内部使用，由 widget 回调触发）。
+  /// 原生 -> Flutter 事件（内部使用，由 widget 回调触发）。可注册多个同名监听。
   void on(String name, void Function(dynamic data) listener) {
-    eventListeners[name] = listener;
+    (eventListeners[name] ??= <void Function(dynamic)>[]).add(listener);
+  }
+
+  /// 取消监听：不传 listener 则移除该事件的全部监听。
+  void off(String name, [void Function(dynamic data)? listener]) {
+    if (listener == null) {
+      eventListeners.remove(name);
+    } else {
+      eventListeners[name]?.remove(listener);
+    }
   }
 }

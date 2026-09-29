@@ -38,7 +38,7 @@ local function page()
         { Expanded, { Column, crossAxisAlignment = "start", gap = 4,
           { Text, text = "张三", fontSize = 22, fontWeight = "bold", color = "#FFFFFF" },
           { Text, text = "VIP 会员 · 已实名", fontSize = 13, color = "#DDDDFF" } } },
-        { Button, text = "签到", onClick = { call = "ping" } } } },
+        { ElevatedButton, text = "签到", onClick = { call = "ping" } } } },
 
     -- 事件横幅
     { Container, color = "#FFF9C4", padding = { 16, 10, 16, 10 },
@@ -99,9 +99,9 @@ local function page()
 
       { Divider },
       { Text, text = "调用 Dart", fontSize = 16, fontWeight = "bold" },
-      { Button, text = "同步：getUserInfo({id=7})", width = "fill",
+      { ElevatedButton, text = "同步：getUserInfo({id=7})", width = "fill",
         onClick = { call = "getUserInfo", args = { id = 7 } } },
-      { Button, text = "异步：add(3,4) 后取用户", width = "fill",
+      { ElevatedButton, text = "异步：add(3,4) 后取用户", width = "fill",
         onClick = { event = "异步加", call = "add", args = { a = 3, b = 4 } } },
     } },
 
@@ -109,7 +109,7 @@ local function page()
     { Container, color = "#FAFAFA", padding = 12,
       { Row, gap = 12,
         { Expanded, { TextButton, text = "退出登录", onClick = "ping" } },
-        { Expanded, { Button, text = "立即下单",
+        { Expanded, { ElevatedButton, text = "立即下单",
           onClick = { call = "toUpper", args = { text = "订单已创建" } } } } } },
   }
 end
