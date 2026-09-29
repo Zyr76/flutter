@@ -15,10 +15,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -51,14 +53,45 @@ public final class FlutterLuaBridge {
 
     private static final String TAG = "FlutterLuaBridge";
 
-    private static final Map<LuaContext, LuaState> STATES =
-            Collections.synchronizedMap(new WeakHashMap<LuaContext, LuaState>());
+    /**
+     * 同一个 LuaContext 下可能同时存在多个 LuaState（主脚本 + thread/task/runnable 各自新建的），
+     * 所以这里记录的是一个集合：事件要广播给它们。
+     *
+     * <p>旧实现是 Map&lt;LuaContext, LuaState&gt;（单值），thread/task 注册时会把主脚本的 L 覆盖掉——
+     * 典型症状：调用过一次 thread 之后，主脚本里定义的 id 句柄（h.onClick / h.onChange）再也收不到事件。
+     * 用弱引用集合，线程结束、LuaState 不再被引用时自然回收。
+     */
+    private static final Map<LuaContext, Set<LuaState>> STATES =
+            Collections.synchronizedMap(new WeakHashMap<LuaContext, Set<LuaState>>());
+
+    private static void rememberState(final LuaState L, final LuaContext context) {
+        synchronized (STATES) {
+            Set<LuaState> set = STATES.get(context);
+            if (set == null) {
+                set = Collections.synchronizedSet(
+                        Collections.newSetFromMap(new WeakHashMap<LuaState, Boolean>()));
+                STATES.put(context, set);
+            }
+            set.add(L);
+        }
+    }
+
+    /** 取该 context 下所有仍存活的 LuaState 快照（可能是空列表）。 */
+    private static List<LuaState> statesOf(final LuaContext context) {
+        Set<LuaState> set = STATES.get(context);
+        if (set == null) {
+            return Collections.emptyList();
+        }
+        synchronized (set) {
+            return new ArrayList<LuaState>(set);
+        }
+    }
 
     private FlutterLuaBridge() {
     }
 
     public static void register(final LuaState L, final LuaContext context) throws LuaException {
-        STATES.put(context, L);
+        rememberState(L, context);
 
         installWidgetFallback(L);
         installNodeHandlers(L);
@@ -580,41 +613,41 @@ public final class FlutterLuaBridge {
         flutter.setEventSink(new FlutterLua.EventSink() {
             @Override
             public void onFlutterEvent(String json) {
-                LuaState L = STATES.get(context);
-                if (L == null) {
-                    return;
-                }
-                synchronized (L) {
-                    try {
-                        org.json.JSONObject o = new org.json.JSONObject(json);
-                        String name = o.optString("name", null);
+                // 广播给该 context 下的所有 LuaState：主脚本 + 各 thread/task。
+                // 没定义处理器的状态自然什么都不做。
+                for (LuaState L : statesOf(context)) {
+                    synchronized (L) {
+                        try {
+                            org.json.JSONObject o = new org.json.JSONObject(json);
+                            String name = o.optString("name", null);
 
-                        // 分发顺序：具体回调先走，总监听（onFlutterEvent）最后旁路通知。
-                        // 以前定义了就 return，会把 h.onClick / 同名全局函数全吞掉。
-                        if (name != null && !name.isEmpty()) {
-                            // 1) AndroLua 风格：事件名 -> 同名全局 Lua 函数
-                            LuaObject fn = L.getLuaObject(name);
-                            if (fn.isFunction()) {
-                                fn.push();
-                                LuaJson.pushJava(L, o.opt("data"));
-                                pcallChecked(L, 1, "事件 " + name);
+                            // 分发顺序：具体回调先走，总监听（onFlutterEvent）最后旁路通知。
+                            // 以前定义了就 return，会把 h.onClick / 同名全局函数全吞掉。
+                            if (name != null && !name.isEmpty()) {
+                                // 1) AndroLua 风格：事件名 -> 同名全局 Lua 函数
+                                LuaObject fn = L.getLuaObject(name);
+                                if (fn.isFunction()) {
+                                    fn.push();
+                                    LuaJson.pushJava(L, o.opt("data"));
+                                    pcallChecked(L, 1, "事件 " + name);
+                                }
+                                // 2) id 句柄回调：h.onClick = fn / h.onChange = fn
+                                dispatchNodeHandler(L, name, o);
                             }
-                            // 2) id 句柄回调：h.onClick = fn / h.onChange = fn
-                            dispatchNodeHandler(L, name, o);
-                        }
 
-                        // 3) 总监听：定义了 onFlutterEvent / 收到Flutter事件 就会收到所有事件（不再阻断上面）
-                        LuaObject any = L.getLuaObject("onFlutterEvent");
-                        if (!any.isFunction()) {
-                            any = L.getLuaObject("收到Flutter事件");
+                            // 3) 总监听：定义了 onFlutterEvent / 收到Flutter事件 就会收到所有事件（不再阻断上面）
+                            LuaObject any = L.getLuaObject("onFlutterEvent");
+                            if (!any.isFunction()) {
+                                any = L.getLuaObject("收到Flutter事件");
+                            }
+                            if (any.isFunction()) {
+                                any.push();
+                                LuaJson.pushJson(L, json);
+                                pcallChecked(L, 1, "onFlutterEvent");
+                            }
+                        } catch (Exception e) {
+                            logError("处理 Flutter 事件失败: " + json, e);
                         }
-                        if (any.isFunction()) {
-                            any.push();
-                            LuaJson.pushJson(L, json);
-                            pcallChecked(L, 1, "onFlutterEvent");
-                        }
-                    } catch (Exception e) {
-                        logError("处理 Flutter 事件失败: " + json, e);
                     }
                 }
             }

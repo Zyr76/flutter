@@ -101,17 +101,17 @@ function 收到Flutter事件(e)
 end
 
 -- ---------- 原生按钮 -> Dart 逻辑 ----------
--- dartCall 会阻塞等 Dart 应答，必须离开主线程
+-- 用【异步】dartCall：回调在主 Lua 状态里执行，可以直接访问 hint / 其它主脚本全局变量。
+-- 注意：thread{...} 里是另一个 Lua 状态（新 LuaState），主脚本的全局变量（如 hint、内置控件句柄）
+--       在那边都是 nil——所以不要在 thread 里直接操作主脚本的控件。若必须同步调用，
+--       请用 activity.runOnUiThread 回主线程后，通过 activity.call("函数名") 之类的方式转交。
 nativeBtn.onClick = function()
   hint.setText("正在调用 Dart getUserInfo …")
-  thread(function()
-    local info = dartCall("getUserInfo", { id = 7 })
-    activity.runOnUiThread(function()
-      if info then
-        hint.setText("Dart 返回：name=" .. tostring(info.name) .. ", age=" .. tostring(info.age))
-      else
-        hint.setText("dartCall 返回 nil")
-      end
-    end)
+  调用Dart("getUserInfo", { id = 7 }, function(info, err)
+    if info then
+      hint.setText("Dart 返回：name=" .. tostring(info.name) .. ", age=" .. tostring(info.age))
+    else
+      hint.setText("dartCall 失败：" .. tostring(err))
+    end
   end)
 end

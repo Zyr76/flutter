@@ -182,16 +182,20 @@ end
 ## 7. 与 Dart 通信
 
 ```lua
--- 主线程：自动异步化，结果通过 dartCallResult 事件回传
--- 非主线程（thread{} 内）：同步返回
-thread(function()
-  local info = dartCall("getUserInfo", { id = 7 })
-  activity.runOnUiThread(function() hint.setText(info.name) end)
+-- 推荐：异步调用。回调在主 Lua 状态里执行，能直接访问 hint 等主脚本全局变量
+调用Dart("getUserInfo", { id = 7 }, function(info, err)
+  if info then hint.setText("name=" .. tostring(info.name)) else hint.setText("失败：" .. tostring(err)) end
 end)
 
--- 显式异步：第三参是回调
-dartCall("add", { a = 1, b = 2 }, function(result, err) print(result.result) end)
+-- 同步形式（会阻塞等应答）只能在非主线程用：
+-- thread(function() local info = dartCall("getUserInfo", { id = 7 }) end)
 ```
+
+> **`thread{}` 是独立的 Lua 状态（新的 LuaState）**：主脚本的全局变量（`hint`、`nativeBtn`、id 句柄…）在那边**全是 nil**，
+> 直接访问会报 `attempt to index a nil value`。所以：**不要在 thread 里直接操作主脚本的控件**，优先用上面的异步回调。
+>
+> 事件是**广播**的：同一个 Activity 下主脚本与各 thread/task 的状态都会收到 Flutter 事件（谁定义了处理器谁执行），
+> 所以即使调用过 `thread{}`，主脚本里的 `h.onClick` / `收到Flutter事件` 依然照常工作。
 
 内置 Dart 方法：`getUserInfo`、`add`、`toUpper`、`fib`、`now`、`uuid`、`randomInt`、`sleep`、`jsonEncode`/`jsonDecode`、`base64Encode`/`base64Decode`、`httpGet`/`httpPost`、`login`、`fetchOrders`、`saveProfile`。
 
@@ -225,5 +229,7 @@ dartCall("add", { a = 1, b = 2 }, function(result, err) print(result.result) end
 | `loadlayout.lua: attempt to call a string value` | 原生布局里写了 Flutter 控件名 → 改用 Android 类名 |
 | `attempt to index a nil value (global 'xxx')` | 该 id 未成功生成全局句柄（非法/保留字/被占用）→ 看控制台提示，或改用 `flutterNode("xxx")` |
 | 报 `[dartCall] ...` 提示 | 那是提示不是错误，用于说明 id 未绑定或主线程同步调用的替代方案 |
+| `attempt to index a nil value (global 'hint')` | 在 `thread{}` 里访问了主脚本的全局变量——thread 是独立 Lua 状态。改用异步 `调用Dart(..., 回调)` |
+| 调用过 thread 后 id 回调不触发 | 已修复（事件现在广播给该 Activity 下所有 Lua 状态）|
 | 设置了属性但没生效 | 检查属性名是否为 Flutter 原名；不认识的 Dart 值会退回默认值 |
 | 嵌套过深报错 | 控件树超过 200 层会返回占位，通常意味着构造出了循环引用 |
