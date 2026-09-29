@@ -88,10 +88,24 @@ class Props {
 
   String get type => (map['type'] ?? map['t'] ?? '').toString().toLowerCase();
 
-  /// 读规范键；不存在时回退到任何指向它的别名键（onPressed/layout_width/gravity…）。
+  /// 小写键 -> 原键，用于大小写不敏感读取（h.Text 与 h.text 等价）。
+  late final Map<String, String> _lower = _buildLower();
+
+  Map<String, String> _buildLower() {
+    final m = <String, String>{};
+    map.forEach((k, v) => m.putIfAbsent(k.toLowerCase(), () => k));
+    return m;
+  }
+
+  /// 读规范键；先精确，再大小写不敏感，最后回退到指向它的别名键（onPressed/layout_width/gravity…）。
   dynamic operator [](String k) {
     final v = map[k];
     if (v != null) return v;
+    final lk = _lower[k.toLowerCase()];
+    if (lk != null) {
+      final lv = map[lk];
+      if (lv != null) return lv;
+    }
     final aliases = _aliasesOf[k];
     if (aliases != null) {
       for (final a in aliases) {
@@ -104,6 +118,7 @@ class Props {
 
   bool has(String k) {
     if (map.containsKey(k)) return true;
+    if (_lower.containsKey(k.toLowerCase())) return true;
     return _aliasesOf[k]?.any(map.containsKey) ?? false;
   }
 
@@ -252,6 +267,23 @@ class Props {
 
   static Axis toAxis(dynamic v) =>
       v?.toString().toLowerCase() == 'horizontal' ? Axis.horizontal : Axis.vertical;
+
+  static TextDirection toTextDirection(dynamic v) =>
+      v?.toString().toLowerCase() == 'rtl' ? TextDirection.rtl : TextDirection.ltr;
+
+  static VerticalDirection toVerticalDirection(dynamic v) =>
+      v?.toString().toLowerCase() == 'up' ? VerticalDirection.up : VerticalDirection.down;
+
+  static Clip toClip(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'none': return Clip.none;
+      case 'hardedge':
+      case 'hard_edge': return Clip.hardEdge;
+      case 'antialiaswithsavelayer':
+      case 'anti_alias_with_save_layer': return Clip.antiAliasWithSaveLayer;
+      default: return Clip.antiAlias;
+    }
+  }
 
   static ScrollPhysics? toPhysics(dynamic v) {
     switch (v?.toString().toLowerCase()) {

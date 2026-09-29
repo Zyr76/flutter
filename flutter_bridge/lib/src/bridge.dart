@@ -26,6 +26,13 @@ class FlutterBridge {
   /// 当前渲染的 widget 树描述（JSON 字符串），由原生 `render` 写入。
   final ValueNotifier<String?> spec = ValueNotifier<String?>(null);
 
+  /// 每个带 id 节点的当前 spec，供命令式更新（patch）或全量 render 时定点重建。
+  final Map<String, ValueNotifier<dynamic>> nodeSpecs = {};
+
+  /// 取得（必要时创建）某 id 节点的 spec notifier。
+  ValueNotifier<dynamic> nodeNotifier(String id, dynamic initial) =>
+      nodeSpecs.putIfAbsent(id, () => ValueNotifier<dynamic>(initial));
+
   /// dartCall 的逻辑方法表：名字 -> 函数(参数 map) -> 可 JSON 序列化的返回值。
   final Map<String, dynamic Function(Map<String, dynamic>? args)> handlers = {};
 
@@ -92,6 +99,14 @@ class FlutterBridge {
     switch (call.method) {
       case 'render':
         spec.value = call.arguments as String?;
+        return null;
+      case 'patch':
+        // 命令式更新：只更新指定 id 节点，由 _IdNode 定点重建，不动全树。
+        final m = (call.arguments as Map).cast<String, dynamic>();
+        final id = m['id']?.toString();
+        if (id != null) {
+          nodeSpecs[id]?.value = m['spec'];
+        }
         return null;
       case 'call':
         final args = (call.arguments as List).cast<dynamic>();

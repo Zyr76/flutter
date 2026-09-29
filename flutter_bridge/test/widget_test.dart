@@ -299,4 +299,91 @@ void main() {
     expect(find.byWidgetPredicate((w) => w is Radio), findsOneWidget);
     expect(find.byWidgetPredicate((w) => w is RadioGroup<dynamic>), findsOneWidget);
   });
+
+  testWidgets('id 节点定点更新：改 notifier 只重建该节点', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'Text', 'id': 'h', 'text': '旧'},
+      '3': {'1': 'Text', 'text': '固定'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('旧'), findsOneWidget);
+    // 模拟 h.Text="新" 下发的 patch
+    FlutterBridge.instance.nodeSpecs['h']!.value = {'1': 'Text', 'id': 'h', 'text': '新'};
+    await tester.pump();
+    expect(find.text('新'), findsOneWidget);
+    expect(find.text('旧'), findsNothing);
+    expect(find.text('固定'), findsOneWidget);
+  });
+
+  testWidgets('属性名大小写不敏感：h.Text 等价 text', (tester) async {
+    final w = Renderer.build(jsonEncode({'1': 'Text', 'Text': '大写键'}));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('大写键'), findsOneWidget);
+  });
+
+  testWidgets('图片 src 自适应：network / data(base64) / file', (tester) async {
+    Future<Image> buildImage(String src) async {
+      final w = Renderer.build(jsonEncode({'1': 'Image', 'src': src}));
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+      return tester.widget<Image>(find.byType(Image));
+    }
+
+    final net = await buildImage('https://example.com/a.png');
+    expect(net.image, isA<NetworkImage>());
+
+    const png1x1 =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    final mem = await buildImage('data:image/png;base64,$png1x1');
+    expect(mem.image, isA<MemoryImage>());
+
+    final file = await buildImage('/data/local/tmp/a.png');
+    expect(file.image, isA<FileImage>());
+  });
+
+  testWidgets('扩充控件批量渲染不报错', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'SingleChildScrollView',
+      'child': {
+        '1': 'Column',
+        'gap': 8,
+        'children': [
+          {'1': 'Material', 'elevation': 2, 'child': {'1': 'Text', 'text': 'M'}},
+          {'1': 'SegmentedButton', 'segments': [
+            {'value': 'a', 'label': 'A'},
+            {'value': 'b', 'label': 'B'},
+          ], 'selected': ['a']},
+          {'1': 'ToggleButtons', 'isSelected': [true, false], 'children': [
+            {'1': 'Text', 'text': 'T1'},
+            {'1': 'Text', 'text': 'T2'},
+          ]},
+          {'1': 'PopupMenuButton', 'items': [{'value': 'x', 'text': 'X'}]},
+          {'1': 'ActionChip', 'text': 'chip'},
+          {'1': 'RangeSlider', 'min': 0, 'max': 10, 'start': 2, 'end': 8},
+          {'1': 'NavigationBar', 'items': [
+            {'icon': 'home', 'label': 'H'},
+            {'icon': 'person', 'label': 'P'},
+          ]},
+          {'1': 'AnimatedScale', 'scale': 1.0, 'child': {'1': 'Text', 'text': 'scale'}},
+          {'1': 'AnimatedCrossFade', 'children': [
+            {'1': 'Text', 'text': 'one'},
+            {'1': 'Text', 'text': 'two'},
+          ]},
+          {'1': 'RichText', 'spans': [
+            {'text': 'ra', 'fontWeight': 'bold'},
+            {'text': 'rb'},
+          ]},
+          {'1': 'DecoratedBox', 'color': '#eeeeee', 'child': {'1': 'Text', 'text': 'D'}},
+          {'1': 'ConstrainedBox', 'minWidth': 10, 'child': {'1': 'Text', 'text': 'C'}},
+        ],
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(find.text('M'), findsOneWidget);
+    expect(find.byType(SegmentedButton<String>), findsOneWidget);
+    expect(find.byType(RangeSlider), findsOneWidget);
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(AnimatedCrossFade), findsOneWidget);
+    expect(find.text('rarb'), findsOneWidget);
+  });
 }

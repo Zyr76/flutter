@@ -68,6 +68,11 @@ public final class FlutterLuaBridge {
             public int execute() throws LuaException {
                 FlutterLua flutter = flutter(context);
                 String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
+                try {
+                    flutter.setSpec(new JSONObject(json));
+                } catch (Exception e) {
+                    logError("解析 spec 失败，命令式 h.X=值 暂不可用", e);
+                }
                 flutter.render(json);
                 bindIds(L, json);
 
@@ -188,6 +193,31 @@ public final class FlutterLuaBridge {
             }
         };
         reg(event, "flutterEvent", "发送Flutter事件", "原生发送事件");
+
+        // ---- __flutter_apply(id, key, value) ---- 内部：h.Text="..." 这类命令式属性赋值
+        JavaFunction apply = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                FlutterLua f = FlutterLua.peek(context);
+                if (f == null) {
+                    warn(L, "尚未渲染 Flutter 布局，无法通过 id 改属性");
+                    return 0;
+                }
+                String id = L.toString(2);
+                String key = L.toString(3);
+                Object value;
+                try {
+                    value = new JSONTokener(LuaJson.encode(L, 4)).nextValue();
+                } catch (Exception e) {
+                    value = L.isNoneOrNil(4) ? null : L.toString(4);
+                }
+                if (!f.patchNode(id, key, value)) {
+                    warn(L, "未找到 id=\"" + id + "\" 的节点，无法设置 " + key);
+                }
+                return 0;
+            }
+        };
+        reg(apply, "__flutter_apply");
     }
 
     /**
@@ -235,9 +265,14 @@ public final class FlutterLuaBridge {
                         + "  return setmetatable({ __id = id }, {\n"
                         + "    __index = function(t, k) local h = __flutter_handlers[id]; return h and h[k] end,\n"
                         + "    __newindex = function(t, k, v)\n"
-                        + "      local h = __flutter_handlers[id]\n"
-                        + "      if not h then h = {}; __flutter_handlers[id] = h end\n"
-                        + "      h[k] = v\n"
+                        + "      if k == 'onClick' or k == 'onTap' or k == 'click'\n"
+                        + "         or k == 'onChange' or k == 'onChanged' then\n"
+                        + "        local h = __flutter_handlers[id]\n"
+                        + "        if not h then h = {}; __flutter_handlers[id] = h end\n"
+                        + "        h[k] = v\n"
+                        + "      else\n"
+                        + "        __flutter_apply(id, k, v)\n"
+                        + "      end\n"
                         + "    end\n"
                         + "  })\n"
                         + "end";

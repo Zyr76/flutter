@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -71,7 +73,22 @@ class Renderer {
     if (spec is! Map) return const SizedBox.shrink();
 
     final p = Props.of(spec);
-    final children = _children(p['children'] ?? p['child'], path);
+    // 带 id 的节点包一层可按 id 定点更新的壳（命令式 h.Text=值 / patch 局部重建）。
+    final id = p['id'];
+    if (id != null && id.toString().isNotEmpty) {
+      return _IdNode(key: ValueKey('idnode:$id'), id: id.toString(), spec: spec, path: path);
+    }
+    return _buildNode(p, path, _children(p['children'] ?? p['child'], path));
+  }
+
+  /// 构建单个节点（不含 id 包裹）。_IdNode 定点重建时也走这里，避免重复包裹。
+  static Widget? _buildNodeFor(dynamic spec, String path) {
+    if (spec is! Map) return _buildInner(spec, path);
+    final p = Props.of(spec);
+    return _buildNode(p, path, _children(p['children'] ?? p['child'], path));
+  }
+
+  static Widget? _buildNode(Props p, String path, List<Widget> children) {
     Widget child0() => children.isNotEmpty ? children.first : const SizedBox.shrink();
 
     final ext = custom[p.type];
@@ -87,6 +104,8 @@ class Renderer {
           mainAxisAlignment: Props.toMainAxis(p['mainAxisAlignment'] ?? p['gravity']),
           crossAxisAlignment: Props.toCrossAxis(p['crossAxisAlignment']),
           mainAxisSize: Props.toMainAxisSize(p['mainAxisSize']),
+          textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
+          verticalDirection: p.has('verticalDirection') ? Props.toVerticalDirection(p['verticalDirection']) : VerticalDirection.down,
           spacing: p.nz('gap'),
           children: children,
         );
@@ -96,6 +115,8 @@ class Renderer {
           mainAxisAlignment: Props.toMainAxis(p['mainAxisAlignment'] ?? p['gravity']),
           crossAxisAlignment: Props.toCrossAxis(p['crossAxisAlignment']),
           mainAxisSize: Props.toMainAxisSize(p['mainAxisSize']),
+          textDirection: p.has('textDirection') ? Props.toTextDirection(p['textDirection']) : null,
+          verticalDirection: p.has('verticalDirection') ? Props.toVerticalDirection(p['verticalDirection']) : VerticalDirection.down,
           spacing: p.nz('gap'),
           children: children,
         );
@@ -104,6 +125,7 @@ class Renderer {
         result = Stack(
           alignment: p.align('alignment') ?? AlignmentDirectional.topStart,
           fit: p.s('fit')?.toLowerCase() == 'expand' ? StackFit.expand : StackFit.loose,
+          clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : (p.b('clip') ? Clip.antiAlias : Clip.hardEdge),
           children: children,
         );
         break;
@@ -115,6 +137,8 @@ class Renderer {
           padding: p.inset('padding'),
           margin: p.inset('margin'),
           decoration: _decoration(p),
+          foregroundDecoration: p['foregroundDecoration'] != null ? _decoration(Props.of(p['foregroundDecoration'])) : null,
+          constraints: (p.has('minWidth') || p.has('maxWidth') || p.has('minHeight') || p.has('maxHeight')) ? _constraints(p) : null,
           clipBehavior: p.b('clip') ? Clip.antiAlias : Clip.none,
           child: child0(),
         );
@@ -221,44 +245,36 @@ class Renderer {
         result = Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color'), size: p.n('size'));
         break;
       case 'image':
-        final url = p['url'] ?? p['src'] ?? p['asset'];
-        if (url == null) {
-          result = _imagePlaceholder(p);
-        } else {
-          final u = url.toString();
-          final fit = Props.toBoxFit(p['fit']);
-          Widget img = u.startsWith('http')
-              ? Image.network(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: fit,
-                  errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'))
-              : Image.asset(u, width: Props.dim(p['width']), height: Props.dim(p['height']), fit: fit,
-                  errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
-          final radius = p.n('radius') ?? p.n('borderRadius');
-          if (radius != null) img = ClipRRect(borderRadius: BorderRadius.circular(radius), child: img);
-          result = img;
-        }
+        result = _imageWidget(p);
         break;
 
       // ---------- 按钮 ----------
       case 'button' || 'elevatedbutton' || 'textbutton' || 'filledbutton' || 'outlinedbutton':
         final label = (p['text'] ?? p['label'] ?? 'Button').toString();
-        final onTap = _tapHandler(p);
+        Widget child = _widgetOrText(p['child'], label, '$path/child');
+        if (p['icon'] != null) {
+          child = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [Icon(Props.toIcon(p['icon'])), SizedBox(width: p.nz('iconGap', 8)), child],
+          );
+        }
+        final onTap = p.b('enabled', true) ? _tapHandler(p) : null;
         final style = _buttonStyle(p);
-        final child = _widgetOrText(p['child'], label, '$path/child');
-        result = Padding(
-          padding: p.inset('padding') ?? EdgeInsets.zero,
-          child: p.type == 'textbutton'
-              ? TextButton(onPressed: onTap, style: style, child: child)
-              : p.type == 'outlinedbutton'
-                  ? OutlinedButton(onPressed: onTap, style: style, child: child)
-                  : p.type == 'filledbutton'
-                      ? FilledButton(onPressed: onTap, style: style, child: child)
-                      : ElevatedButton(onPressed: onTap, style: style, child: child),
-        );
+        Widget btn = p.type == 'textbutton'
+            ? TextButton(onPressed: onTap, style: style, child: child)
+            : p.type == 'outlinedbutton'
+                ? OutlinedButton(onPressed: onTap, style: style, child: child)
+                : p.type == 'filledbutton'
+                    ? FilledButton(onPressed: onTap, style: style, child: child)
+                    : ElevatedButton(onPressed: onTap, style: style, child: child);
+        if (p['tooltip'] != null) btn = Tooltip(message: p['tooltip'].toString(), child: btn);
+        result = Padding(padding: p.inset('padding') ?? EdgeInsets.zero, child: btn);
         break;
       case 'iconbutton':
         result = IconButton(
-          icon: Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color')),
-          onPressed: _tapHandler(p),
+          icon: Icon(Props.toIcon(p['icon'] ?? p['name']), color: p.color('color'), size: p.n('iconSize') ?? p.n('size')),
+          tooltip: p.s('tooltip'),
+          onPressed: p.b('enabled', true) ? _tapHandler(p) : null,
         );
         break;
       case 'floatingactionbutton':
@@ -301,7 +317,11 @@ class Renderer {
           title: _slotText(p['title'] ?? p['text'], '$path/title'),
           subtitle: _slotText(p['subtitle'], '$path/subtitle'),
           trailing: _slotText(p['trailing'], '$path/trailing'),
+          dense: p.b('dense'),
+          enabled: p.b('enabled', true),
+          selected: p.b('selected'),
           onTap: _tapHandler(p),
+          onLongPress: _namedEvent(p, 'longPress'),
         );
         break;
 
@@ -368,13 +388,19 @@ class Renderer {
           suffixIcon: p.s('suffixIcon') ?? p.s('rightIcon'),
           readOnly: p.b('readOnly'),
           enabled: p.b('enabled', true),
+          autofocus: p.b('autofocus'),
+          textAlign: Props.toTextAlign(p['textAlign']),
           onChanged: (v) => _change(p, v),
         );
         break;
       case 'inkwell':
       case 'gesturedetector':
         final onTap = _tapHandler(p);
-        result = p.type == 'inkwell' ? InkWell(onTap: onTap, child: child0()) : GestureDetector(onTap: onTap, child: child0());
+        final onLongPress = _namedEvent(p, 'longPress');
+        final onDoubleTap = _namedEvent(p, 'doubleTap');
+        result = p.type == 'inkwell'
+            ? InkWell(onTap: onTap, onLongPress: onLongPress, onDoubleTap: onDoubleTap, child: child0())
+            : GestureDetector(onTap: onTap, onLongPress: onLongPress, onDoubleTap: onDoubleTap, child: child0());
         break;
       case 'dropdownbutton' || 'dropdownbuttonformfield':
         result = p.type == 'dropdownbuttonformfield'
@@ -414,6 +440,7 @@ class Renderer {
           backgroundColor: p.color('backgroundColor') ?? p.color('color'),
           foregroundColor: p.color('foregroundColor'),
           centerTitle: p.b('centerTitle'),
+          toolbarHeight: p.n('toolbarHeight'),
           automaticallyImplyLeading: p.b('automaticallyImplyLeading', true),
         );
         break;
@@ -657,6 +684,254 @@ class Renderer {
         );
         break;
 
+      // ============================================================
+      // 更多布局 / 装饰 / 包装
+      // ============================================================
+      case 'material':
+        result = Material(
+          color: p.color('color') ?? p.color('backgroundColor'),
+          elevation: p.n('elevation') ?? 0,
+          borderRadius: p.n('radius') != null ? BorderRadius.circular(p.n('radius')!) : null,
+          child: child0(),
+        );
+        break;
+      case 'decoratedbox':
+        result = DecoratedBox(decoration: _decoration(p) ?? const BoxDecoration(), child: child0());
+        break;
+      case 'coloredbox':
+        result = ColoredBox(color: p.color('color') ?? Colors.transparent, child: child0());
+        break;
+      case 'constrainedbox':
+        result = ConstrainedBox(constraints: _constraints(p), child: child0());
+        break;
+      case 'intrinsicwidth':
+        result = IntrinsicWidth(child: child0());
+        break;
+      case 'intrinsicheight':
+        result = IntrinsicHeight(child: child0());
+        break;
+      case 'fittedbox':
+        result = FittedBox(fit: Props.toBoxFit(p['fit']), child: child0());
+        break;
+      case 'rotatedbox':
+        result = RotatedBox(quarterTurns: p.i('quarterTurns') ?? p.i('turns') ?? 1, child: child0());
+        break;
+      case 'clipoval':
+        result = ClipOval(child: child0());
+        break;
+      case 'cliprect':
+        result = ClipRect(child: child0());
+        break;
+      case 'offstage':
+        result = Offstage(offstage: p.b('offstage', true), child: child0());
+        break;
+      case 'visibility':
+        result = Visibility(visible: p.b('visible', true), child: child0());
+        break;
+      case 'absorbpointer':
+        result = AbsorbPointer(absorbing: p.b('absorbing', true), child: child0());
+        break;
+      case 'ignorepointer':
+        result = IgnorePointer(ignoring: p.b('ignoring', true), child: child0());
+        break;
+      case 'scrollbar':
+        result = Scrollbar(child: child0());
+        break;
+      case 'indexedstack':
+        result = IndexedStack(index: p.i('index') ?? 0, children: children);
+        break;
+      case 'baseline':
+        result = Baseline(
+          baselineType: p.s('baselineType')?.toLowerCase() == 'alphabetic'
+              ? TextBaseline.alphabetic
+              : TextBaseline.ideographic,
+          baseline: p.n('baseline') ?? 0,
+          child: child0(),
+        );
+        break;
+      case 'limitedbox':
+        result = LimitedBox(
+          maxWidth: p.n('maxWidth') ?? double.infinity,
+          maxHeight: p.n('maxHeight') ?? double.infinity,
+          child: child0(),
+        );
+        break;
+
+      // ============================================================
+      // 更多按钮 / 选择控件
+      // ============================================================
+      case 'materialbutton':
+        result = MaterialButton(
+          onPressed: _tapHandler(p),
+          color: p.color('color') ?? p.color('backgroundColor'),
+          child: _widgetOrText(p['child'], (p['text'] ?? 'Button').toString(), '$path/child'),
+        );
+        break;
+      case 'segmentedbutton':
+        result = SegmentedButton<String>(
+          segments: p.list('segments').map((s) {
+            final sp = Props.of(s);
+            return ButtonSegment<String>(
+              value: (sp['value'] ?? sp['label'] ?? '').toString(),
+              label: Text((sp['label'] ?? sp['text'] ?? '').toString()),
+              icon: sp['icon'] != null ? Icon(Props.toIcon(sp['icon'])) : null,
+            );
+          }).toList(),
+          selected: Props.toList(p['selected']).map((e) => e.toString()).toSet(),
+          onSelectionChanged: (s) => _emit(p['onChange'], s.toList(), fallback: p.map),
+        );
+        break;
+      case 'togglebuttons':
+        final sel = Props.toList(p['isSelected']).map((e) => Props.toBool(e) ?? false).toList();
+        result = ToggleButtons(
+          isSelected: sel.length == children.length ? sel : List<bool>.filled(children.length, false),
+          onPressed: (i) => _emit(p['onChange'], i, fallback: p.map),
+          children: children,
+        );
+        break;
+      case 'popupmenubutton':
+        result = PopupMenuButton<String>(
+          icon: p['icon'] != null ? Icon(Props.toIcon(p['icon'])) : null,
+          itemBuilder: (ctx) => p.list('items').map((it) {
+            final ip = Props.of(it);
+            return PopupMenuItem<String>(
+              value: (ip['value'] ?? ip['text'] ?? '').toString(),
+              child: Text((ip['text'] ?? ip['label'] ?? '').toString()),
+            );
+          }).toList(),
+          onSelected: (v) => _emit(p['onChange'], v, fallback: p.map),
+        );
+        break;
+      case 'actionchip' || 'filterchip' || 'choicechip' || 'inputchip':
+        final chLabel = (p['text'] ?? p['label'] ?? '').toString();
+        final chAvatar = p['avatar'] != null ? Icon(Props.toIcon(p['avatar'])) : null;
+        if (p.type == 'actionchip') {
+          result = ActionChip(avatar: chAvatar, label: Text(chLabel), onPressed: _tapHandler(p));
+        } else if (p.type == 'filterchip') {
+          result = FilterChip(avatar: chAvatar, label: Text(chLabel), selected: p.b('selected'), onSelected: (v) => _emit(p['onChange'], v, fallback: p.map));
+        } else if (p.type == 'choicechip') {
+          result = ChoiceChip(avatar: chAvatar, label: Text(chLabel), selected: p.b('selected'), onSelected: (v) => _emit(p['onChange'], v, fallback: p.map));
+        } else {
+          result = InputChip(
+            avatar: chAvatar,
+            label: Text(chLabel),
+            selected: p.b('selected'),
+            onPressed: _tapHandler(p),
+            onDeleted: p['onDeleted'] != null ? () => _emit(p['onDeleted'], null, fallback: p.map) : null,
+          );
+        }
+        break;
+      case 'rangeslider':
+        result = BridgeRangeSlider(
+          key: _nodeKey(p, path),
+          start: p.n('start') ?? p.n('min') ?? 0,
+          end: p.n('end') ?? p.n('max') ?? 1,
+          min: p.n('min') ?? 0,
+          max: p.n('max') ?? 1,
+          onChanged: (v) => _change(p, v),
+        );
+        break;
+      case 'dismissible':
+        result = Dismissible(
+          key: ValueKey(p['id'] ?? 'dismiss:$path'),
+          direction: p.s('direction')?.toLowerCase() == 'horizontal'
+              ? DismissDirection.horizontal
+              : DismissDirection.endToStart,
+          child: child0(),
+          onDismissed: (_) => _emit(p['onDismiss'], null, fallback: p.map),
+        );
+        break;
+
+      // ============================================================
+      // 导航 / 表单 / 其它
+      // ============================================================
+      case 'navigationbar':
+        result = BridgeNavigationBar(
+          key: _nodeKey(p, path),
+          items: p.list('items'),
+          initialIndex: p.i('currentIndex') ?? 0,
+          onTap: (i) => _emit(p['onTap'], i, fallback: p.map),
+        );
+        break;
+      case 'bottomappbar':
+        result = BottomAppBar(child: child0());
+        break;
+      case 'form':
+        result = Form(child: child0());
+        break;
+      case 'verticaldivider':
+        result = VerticalDivider(color: p.color('color'), thickness: p.n('thickness'));
+        break;
+      case 'richtext':
+        result = Text.rich(TextSpan(children: p.list('spans').map((s) {
+          final sp = Props.of(s);
+          return TextSpan(text: (sp['text'] ?? '').toString(), style: Props.toTextStyle(sp));
+        }).toList()));
+        break;
+      case 'cupertinoactivityindicator':
+        result = const Center(child: CupertinoActivityIndicator());
+        break;
+
+      // ============================================================
+      // 动画
+      // ============================================================
+      case 'animatedalign':
+        result = AnimatedAlign(
+          alignment: p.align('alignment') ?? Alignment.center,
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: child0(),
+        );
+        break;
+      case 'animatedpadding':
+        result = AnimatedPadding(
+          padding: p.inset('padding') ?? EdgeInsets.zero,
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: child0(),
+        );
+        break;
+      case 'animatedscale':
+        result = AnimatedScale(
+          scale: p.n('scale') ?? 1,
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: child0(),
+        );
+        break;
+      case 'animatedrotation':
+        result = AnimatedRotation(
+          turns: p.n('turns') ?? 0,
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: child0(),
+        );
+        break;
+      case 'animatedslide':
+        result = AnimatedSlide(
+          offset: _offset(p['offset']) ?? Offset.zero,
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: child0(),
+        );
+        break;
+      case 'animatedswitcher':
+        result = AnimatedSwitcher(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          child: children.isEmpty ? null : child0(),
+        );
+        break;
+      case 'animateddefaulttextstyle':
+        result = AnimatedDefaultTextStyle(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          style: Props.toTextStyle(p),
+          child: child0(),
+        );
+        break;
+      case 'animatedcrossfade':
+        result = AnimatedCrossFade(
+          duration: Duration(milliseconds: p.i('duration') ?? 200),
+          firstChild: children.isNotEmpty ? children[0] : const SizedBox.shrink(),
+          secondChild: children.length > 1 ? children[1] : const SizedBox.shrink(),
+          crossFadeState: p.b('showFirst', true) ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+        );
+        break;
+
       // ---------- 原生 ----------
       case 'androidview':
       case 'android':
@@ -888,8 +1163,7 @@ class Renderer {
   }
 
   /// 图片占位：url 缺失或加载失败时显示，避免空白。
-  static Widget _imagePlaceholder(Props p, {String? error}) {
-    final w = Props.dim(p['width']);
+  static Widget _imagePlaceholder(Props p, {String? error}) {    final w = Props.dim(p['width']);
     final h = Props.dim(p['height']);
     final box = Container(
       width: (w == null || w == double.infinity) ? null : w,
@@ -899,6 +1173,42 @@ class Renderer {
       child: const Icon(Icons.broken_image, color: Colors.grey, size: 24),
     );
     return error == null ? box : Tooltip(message: error, child: box);
+  }
+
+  /// 图片控件：统一从 src 取源，Dart 自动判定 network / data(base64) / file / asset。
+  static Widget _imageWidget(Props p) {
+    final src = (p['src'] ?? p['url'] ?? p['asset'] ?? p['file'])?.toString();
+    final w = Props.dim(p['width']);
+    final h = Props.dim(p['height']);
+    final fit = Props.toBoxFit(p['fit']);
+    if (src == null || src.isEmpty) return _imagePlaceholder(p);
+
+    Widget img;
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      img = Image.network(src, width: w, height: h, fit: fit,
+          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+    } else if (src.startsWith('data:')) {
+      final comma = src.indexOf(',');
+      if (comma < 0) return _imagePlaceholder(p, error: '非法 data URI');
+      try {
+        final bytes = base64Decode(src.substring(comma + 1));
+        img = Image.memory(bytes, width: w, height: h, fit: fit,
+            errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+      } catch (e) {
+        return _imagePlaceholder(p, error: 'base64 解码失败: $e');
+      }
+    } else if (src.startsWith('file://') || src.startsWith('/') || src.startsWith('storage/')) {
+      final path = src.startsWith('file://') ? Uri.parse(src).toFilePath() : src;
+      img = Image.file(File(path), width: w, height: h, fit: fit,
+          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+    } else {
+      img = Image.asset(src, width: w, height: h, fit: fit,
+          errorBuilder: (c, e, s) => _imagePlaceholder(p, error: '$e'));
+    }
+
+    final radius = p.n('radius') ?? p.n('borderRadius');
+    if (radius != null) img = ClipRRect(borderRadius: BorderRadius.circular(radius), child: img);
+    return img;
   }
 
   /// 带名字的事件：有 id 时发出指定 type（用于 stepper 等非点击控件）。
@@ -920,6 +1230,20 @@ class Renderer {
     if (v == null) return null;
     if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
     return DateTime.tryParse(v.toString());
+  }
+
+  static BoxConstraints _constraints(Props p) => BoxConstraints(
+        minWidth: p.nz('minWidth'),
+        maxWidth: p.n('maxWidth') ?? double.infinity,
+        minHeight: p.nz('minHeight'),
+        maxHeight: p.n('maxHeight') ?? double.infinity,
+      );
+
+  static Offset? _offset(dynamic v) {
+    if (v is List && v.length >= 2) {
+      return Offset((v[0] as num).toDouble(), (v[1] as num).toDouble());
+    }
+    return null;
   }
 
   // ---------- 回調 ----------
@@ -1242,6 +1566,8 @@ class BridgeTextField extends StatefulWidget {
     this.suffixIcon,
     this.readOnly = false,
     this.enabled = true,
+    this.autofocus = false,
+    this.textAlign = TextAlign.start,
     required this.onChanged,
   });
   final String? hint;
@@ -1255,6 +1581,8 @@ class BridgeTextField extends StatefulWidget {
   final String? suffixIcon;
   final bool readOnly;
   final bool enabled;
+  final bool autofocus;
+  final TextAlign textAlign;
   final ValueChanged<String> onChanged;
   @override
   State<BridgeTextField> createState() => _BridgeTextFieldState();
@@ -1282,6 +1610,8 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
         keyboardType: widget.keyboardType,
         readOnly: widget.readOnly,
         enabled: widget.enabled,
+        autofocus: widget.autofocus,
+        textAlign: widget.textAlign,
         decoration: InputDecoration(
           hintText: widget.hint,
           labelText: widget.label,
@@ -1510,6 +1840,124 @@ class _BridgeAudioState extends State<BridgeAudio> {
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// 可按 id 定点重建的节点壳：监听 FlutterBridge 中该 id 的 spec notifier。
+/// 命令式 `h.Text="..."`（原生侧改 spec 后下发 patch）或全量 render 更新该节点时，
+/// 只有这个子树重建，不牵动整棵树。
+class _IdNode extends StatefulWidget {
+  const _IdNode({super.key, required this.id, required this.spec, required this.path});
+  final String id;
+  final dynamic spec;
+  final String path;
+
+  @override
+  State<_IdNode> createState() => _IdNodeState();
+}
+
+class _IdNodeState extends State<_IdNode> {
+  late final ValueNotifier<dynamic> _notifier =
+      FlutterBridge.instance.nodeNotifier(widget.id, widget.spec);
+
+  @override
+  void initState() {
+    super.initState();
+    _notifier.value = widget.spec;
+  }
+
+  @override
+  void didUpdateWidget(_IdNode old) {
+    super.didUpdateWidget(old);
+    if (!identical(widget.spec, old.spec)) {
+      _notifier.value = widget.spec;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<dynamic>(
+      valueListenable: _notifier,
+      builder: (context, spec, _) =>
+          Renderer._buildNodeFor(spec, widget.path) ?? const SizedBox.shrink(),
+    );
+  }
+}
+
+class BridgeRangeSlider extends StatefulWidget {
+  const BridgeRangeSlider({super.key, required this.start, required this.end, required this.min, required this.max, required this.onChanged});
+  final double start;
+  final double end;
+  final double min;
+  final double max;
+  final ValueChanged<List<double>> onChanged;
+  @override
+  State<BridgeRangeSlider> createState() => _BridgeRangeSliderState();
+}
+
+class _BridgeRangeSliderState extends State<BridgeRangeSlider> {
+  late RangeValues _r = RangeValues(
+    widget.start.clamp(widget.min, widget.max),
+    widget.end.clamp(widget.min, widget.max),
+  );
+
+  @override
+  void didUpdateWidget(BridgeRangeSlider old) {
+    super.didUpdateWidget(old);
+    if (widget.start != old.start || widget.end != old.end) {
+      setState(() => _r = RangeValues(
+            widget.start.clamp(widget.min, widget.max),
+            widget.end.clamp(widget.min, widget.max),
+          ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => RangeSlider(
+        values: _r,
+        min: widget.min,
+        max: widget.max,
+        onChanged: (v) {
+          setState(() => _r = v);
+          widget.onChanged([v.start, v.end]);
+        },
+      );
+}
+
+class BridgeNavigationBar extends StatefulWidget {
+  const BridgeNavigationBar({super.key, required this.items, this.initialIndex = 0, this.onTap});
+  final List<dynamic> items;
+  final int initialIndex;
+  final ValueChanged<int>? onTap;
+  @override
+  State<BridgeNavigationBar> createState() => _BridgeNavigationBarState();
+}
+
+class _BridgeNavigationBarState extends State<BridgeNavigationBar> {
+  late int _index = widget.initialIndex;
+
+  @override
+  void didUpdateWidget(BridgeNavigationBar old) {
+    super.didUpdateWidget(old);
+    if (widget.initialIndex != old.initialIndex) setState(() => _index = widget.initialIndex);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NavigationBar(
+      selectedIndex: widget.items.isEmpty ? 0 : _index.clamp(0, widget.items.length - 1),
+      onDestinationSelected: (i) {
+        setState(() => _index = i);
+        widget.onTap?.call(i);
+      },
+      destinations: widget.items.map((e) {
+        final ip = Props.of(e);
+        return NavigationDestination(
+          icon: Icon(Props.toIcon(ip['icon'])),
+          label: (ip['label'] ?? ip['text'] ?? '').toString(),
+        );
+      }).toList(),
     );
   }
 }

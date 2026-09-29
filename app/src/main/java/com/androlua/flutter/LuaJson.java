@@ -350,7 +350,20 @@ public final class LuaJson {
                 "SwitchListTile", "CheckboxListTile", "RadioListTile", "Radio",
                 "ExpansionTile", "Stepper", "DataTable",
                 "CalendarDatePicker", "DatePicker",
-                "AnimatedOpacity", "AnimatedContainer"
+                "AnimatedOpacity", "AnimatedContainer",
+                // 布局/包装/装饰
+                "Material", "DecoratedBox", "ColoredBox", "ConstrainedBox",
+                "IntrinsicWidth", "IntrinsicHeight", "FittedBox", "RotatedBox",
+                "ClipOval", "ClipRect", "Offstage", "Visibility",
+                "AbsorbPointer", "IgnorePointer", "Scrollbar", "IndexedStack",
+                "Baseline", "LimitedBox",
+                // 按钮/选择/导航/表单/动画
+                "MaterialButton", "SegmentedButton", "ToggleButtons", "PopupMenuButton",
+                "ActionChip", "FilterChip", "ChoiceChip", "InputChip", "RangeSlider",
+                "Dismissible", "NavigationBar", "BottomAppBar", "Form", "VerticalDivider",
+                "RichText", "CupertinoActivityIndicator",
+                "AnimatedAlign", "AnimatedPadding", "AnimatedScale", "AnimatedRotation",
+                "AnimatedSlide", "AnimatedSwitcher", "AnimatedDefaultTextStyle", "AnimatedCrossFade"
         };
         for (String n : names) {
             TYPES.put(n, n);

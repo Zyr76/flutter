@@ -7,8 +7,13 @@ import android.util.Log;
 
 import com.androlua.LuaContext;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.lang.ref.WeakReference;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -70,6 +75,9 @@ public class FlutterLua {
 
     private volatile EventSink eventSink;
     private boolean resumed;
+
+    /** id -> 该节点在最近一次 render 的 spec 树中的 JSONObject，patch 时按 id 定点修改。 */
+    private final Map<String, JSONObject> specIndex = new HashMap<String, JSONObject>();
 
     private FlutterLua(LuaContext luaContext) {
         this.luaContextRef = new WeakReference<LuaContext>(luaContext);
@@ -170,6 +178,60 @@ public class FlutterLua {
 
     public FlutterView getView() {
         return flutterView;
+    }
+
+    /** 保存一份可变的 spec 树并重建 id 索引（每次全量 render 时调用）。 */
+    public void setSpec(JSONObject root) {
+        specIndex.clear();
+        if (root != null) {
+            indexIds(root);
+        }
+    }
+
+    private void indexIds(Object node) {
+        if (node instanceof JSONObject) {
+            JSONObject o = (JSONObject) node;
+            Object id = o.opt("id");
+            if (id instanceof String && !((String) id).isEmpty()) {
+                specIndex.put((String) id, o);
+            }
+            for (Iterator<String> it = o.keys(); it.hasNext(); ) {
+                indexIds(o.opt(it.next()));
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray a = (JSONArray) node;
+            for (int i = 0; i < a.length(); i++) {
+                indexIds(a.opt(i));
+            }
+        }
+    }
+
+    /**
+     * 命令式改某个 id 节点的属性，并把该节点新 spec 下发给 Dart 定点重建。
+     * 返回是否找到了该 id（未找到则不生效）。
+     */
+    public boolean patchNode(final String id, final String key, Object value) {
+        final JSONObject node = specIndex.get(id);
+        if (node == null) {
+            return false;
+        }
+        try {
+            node.put(key, value);
+        } catch (Exception e) {
+            Log.w(TAG, "patchNode 写入失败: " + id + "." + key, e);
+            return false;
+        }
+        final String json = node.toString();
+        runOnMain(new Runnable() {
+            @Override
+            public void run() {
+                HashMap<String, Object> args = new HashMap<String, Object>();
+                args.put("id", id);
+                args.put("spec", json);
+                channel.invokeMethod("patch", args);
+            }
+        });
+        return true;
     }
 
     public void setEventSink(EventSink sink) {
