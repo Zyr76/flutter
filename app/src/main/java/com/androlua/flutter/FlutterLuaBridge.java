@@ -16,12 +16,12 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
-import java.util.regex.Pattern;
 
 /**
  * 把 Flutter 能力注册成 Lua 全局函数，并提供「AndroLua 布局表」风格 + 中文语法的入口。
@@ -407,8 +407,13 @@ public final class FlutterLuaBridge {
             Set<String> ids = new LinkedHashSet<String>();
             collectIds(root, ids);
             for (String id : ids) {
-                if (!isSafeGlobalName(L, id)) {
-                    warn(L, "id \"" + id + "\" 会覆盖已有全局变量或不是合法标识符，已跳过绑定；"
+                if (!isLuaIdentifier(id)) {
+                    warn(L, "id \"" + id + "\" 不是合法 Lua 标识符（或为 Lua 保留字），无法生成全局句柄；"
+                            + "可用 flutterNode(\"" + id + "\") 取该节点句柄。");
+                    continue;
+                }
+                if (!canBindGlobal(L, id)) {
+                    warn(L, "id \"" + id + "\" 会覆盖已有全局变量，已跳过绑定；"
                             + "可用 flutterNode(\"" + id + "\") 取该节点句柄。");
                     continue;
                 }
@@ -452,10 +457,38 @@ public final class FlutterLuaBridge {
      * </ul>
      * 否则绑定会覆盖用户已有变量（如 print/_G），因此拒绝。
      */
-    private static boolean isSafeGlobalName(LuaState L, String id) {
-        if (id == null || !Pattern.matches("[A-Za-z_][A-Za-z0-9_]*", id)) {
+    /** Lua 保留字：不能作为全局名。 */
+    private static final Set<String> LUA_KEYWORDS = new HashSet<String>(java.util.Arrays.asList(
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+            "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
+            "then", "true", "until", "while"));
+
+    /**
+     * 是否是合法的 Lua 标识符：首字符为字母或下划线，后续为字母/数字/下划线。
+     *
+     * <p>刻意用 {@link Character#isLetter}/{@link Character#isLetterOrDigit}（而非只认 ASCII 的正则）：
+     * LuaJ 允许非 ASCII 字母（中文等）作标识符，Lua 侧写 {@code function 按钮.onClick() end} 是完全合法的。
+     * 排除 Lua 保留字（如 end/function），它们无法作为全局名使用。
+     */
+    private static boolean isLuaIdentifier(String s) {
+        if (s == null || s.isEmpty() || LUA_KEYWORDS.contains(s)) {
             return false;
         }
+        char c0 = s.charAt(0);
+        if (c0 != '_' && !Character.isLetter(c0)) {
+            return false;
+        }
+        for (int i = 1; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != '_' && !Character.isLetterOrDigit(c)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 目标全局可用吗：为 nil，或已是本机制生成的代理表（重复渲染同一 id）。 */
+    private static boolean canBindGlobal(LuaState L, String id) {
         L.getGlobal(id);
         int type = L.type(-1);
         boolean ok;
