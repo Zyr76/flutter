@@ -129,6 +129,16 @@ end
 
 ## 4. 事件
 
+两种写法，任选（也可同时用，**两个都会触发**）：
+
+```lua
+-- A) 句柄式：控件写 id
+--    function btn.onClick() ... end / function sw.onChange(v) ... end
+-- B) 声明式：控件里直接写回调名（不依赖 id 句柄）
+--    渲染Flutter{ SwitchListTile, onChange = "onSwChanged" }
+--    function onSwChanged(data) ... end   -- data.value 是新值
+```
+
 三种处理器**都会**被触发（不再互相屏蔽）：
 
 ```lua
@@ -181,7 +191,11 @@ end
 
 ```lua
 flutterDebug(true)    -- 打开后每个事件都打印：name / type / handled / 状态数
+flutterHandlers()     -- 打印 __flutter_handlers 里已注册的 id 与回调
 ```
+
+`flutterHandlers()` 输出形如 `sw2 => onChange(function) | btn => onClick(function)；`
+**某个 id 显示 `(空)`** = 那个回调压根没写进去（常见原因：它前面的语句报错，后面的赋值没执行）。
 
 输出形如 `[Flutter] 事件 name=sw type=change handled=true states=1`。
 `handled=false` 且控制台还会额外提示“没有任何处理器”，说明事件到了但没人为它写回调（检查 id 拼写、是否写在 `id.onChange` 上）。

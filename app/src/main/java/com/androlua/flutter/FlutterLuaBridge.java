@@ -343,6 +343,16 @@ public final class FlutterLuaBridge {
             }
         };
         reg(debug, "flutterDebug", "Flutter调试", "调试Flutter事件");
+
+        // ---- flutterHandlers() ---- 打印 __flutter_handlers 里已注册的 id 与回调（诊断用）
+        JavaFunction dumpHandlers = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                luaPrint(L, "[Flutter] 句柄表：" + flutterHandlersSummary(L));
+                return 0;
+            }
+        };
+        reg(dumpHandlers, "flutterHandlers", "Flutter句柄表", "dumpFlutterHandlers");
     }
 
     /** src 是否是需要拼成绝对路径的“纯文件名/相对路径”。 */
@@ -437,6 +447,19 @@ public final class FlutterLuaBridge {
                         + "      end\n"
                         + "    end\n"
                         + "  })\n"
+                        + "end\n"
+                        + "function __flutter_handlers_summary()\n"
+                        + "  if type(__flutter_handlers) ~= 'table' then return 'no __flutter_handlers' end\n"
+                        + "  local out = {}\n"
+                        + "  for id, h in pairs(__flutter_handlers) do\n"
+                        + "    local ks = {}\n"
+                        + "    if type(h) == 'table' then\n"
+                        + "      for k, v in pairs(h) do ks[#ks+1] = tostring(k) .. '(' .. type(v) .. ')' end\n"
+                        + "    end\n"
+                        + "    out[#out+1] = tostring(id) .. ' => ' .. (#ks == 0 and '(空)' or table.concat(ks, ','))\n"
+                        + "  end\n"
+                        + "  if #out == 0 then return '(一个句柄都没注册回调)' end\n"
+                        + "  return table.concat(out, ' | ')\n"
                         + "end";
         int ok = L.LdoString(chunk);
         if (ok != 0) {
@@ -592,6 +615,27 @@ public final class FlutterLuaBridge {
     /** 事件调试开关：Lua 里调 flutterDebug(true) / Flutter调试(true) 打开，会把每个事件的到达与处理情况打到控制台。 */
     private static volatile boolean DEBUG_EVENTS = false;
 
+    /** 读取 Lua 侧 __flutter_handlers 摘要（诊断用）。 */
+    private static String flutterHandlersSummary(LuaState L) {
+        try {
+            L.getGlobal("__flutter_handlers_summary");
+            if (!L.isFunction(-1)) {
+                L.pop(1);
+                return "(helper missing)";
+            }
+            if (L.pcall(0, 1, 0) != 0) {
+                String e = L.toString(-1);
+                L.pop(1);
+                return "(error: " + e + ")";
+            }
+            String s = L.toString(-1);
+            L.pop(1);
+            return s;
+        } catch (Throwable t) {
+            return "(exception: " + t.getMessage() + ")";
+        }
+    }
+
     /** 把消息打到 Lua 控制台（走 Lua 的 print；失败不影响主流程）。 */
     private static void luaPrint(LuaState L, String msg) {
         if (L == null) return;
@@ -711,6 +755,11 @@ public final class FlutterLuaBridge {
                 if (DEBUG_EVENTS) {
                     luaPrint(first, "[Flutter] 事件 name=" + evtName + " type=" + evtType
                             + " handled=" + handled + " states=" + states.size());
+                    if (first != null) {
+                        synchronized (first) {
+                            luaPrint(first, "[Flutter] 句柄表：" + flutterHandlersSummary(first));
+                        }
+                    }
                 } else if (!handled && evtName != null && !evtName.isEmpty()) {
                     luaPrint(first, "[Flutter] 事件 \"" + evtName + "\" 没有任何处理器；"
                             + "可在同名全局函数、id 句柄的 onClick/onChange、或 收到Flutter事件 里处理");

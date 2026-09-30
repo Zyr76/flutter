@@ -42,7 +42,11 @@ hint.setPadding(24, 24, 24, 24)
       { Divider },
 
       { Text, text = "交互控件", fontSize = 18, fontWeight = "bold" },
-      { SwitchListTile, title = "开关", value = false, id = "sw" },
+      -- 事件两种写法：
+      --   A) 句柄式：控件写 id，脚本里 function id.onClick() / id.onChange = fn
+      --   B) 声明式：控件里直接写 onChange = "函数名"，事件名就是该名字（不依赖 id 句柄）
+      { SwitchListTile, title = "开关（声明式事件）", value = false, onChange = "onSwChanged" },
+      { SwitchListTile, title = "开关（句柄式事件）", value = false, id = "sw2" },
       { CheckboxListTile, title = "复选", value = true },
       { Slider, min = 0, max = 100, value = 30 },
       { ElevatedButton, text = "点我改文字", id = "btn", width = "fill" },
@@ -78,9 +82,15 @@ function btn.onClick()
   btn.dart.backgroundColor = "#4CAF50"
 end
 
--- 开关变化
-function sw.onChange(v)
+-- 开关变化（声明式：spec 里写了 onChange = "onSwChanged"，事件名就是它）
+function onSwChanged(data)
+  local v = data and data.value
   hint.setText("开关：" .. tostring(v))
+end
+
+-- 开关变化（句柄式：id = "sw2" 的句柄）
+function sw2.onChange(v)
+  hint.setText("开关2：" .. tostring(v))
 end
 
 -- 弹对话框：按钮点击事件名 = 字符串 "doClose"，会调用同名全局函数
@@ -98,6 +108,11 @@ end
 function doClose()
   关闭对话框()
 end
+
+-- ---------- 自查：看看回调都注册上了没 ----------
+-- 输出示例：sw2 => onChange(function) | btn => onClick(function) | dlg => onClick(function)
+-- 如果某个 id 显示 (空)，说明那个回调没写进去（比如它前面的代码报错了，后面的语句没执行）
+flutterHandlers()
 
 -- ---------- 总监听：所有事件都会到这里（不会打断上面的具体回调）----------
 function 收到Flutter事件(e)
