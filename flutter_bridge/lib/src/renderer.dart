@@ -747,11 +747,17 @@ class Renderer {
         );
         break;
       case 'refreshindicator':
+        final refreshCb = p['onRefresh'];
+        final refreshId = p['id'];
         result = RefreshIndicator(
           onRefresh: () async {
-            final id = p['id'];
-            if (id != null) {
-              FlutterBridge.instance.emit(id.toString(), {'id': id.toString(), 'type': 'refresh'});
+            // 支持声明式 onRefresh="函数名" / { event=..., args=... }，也兼容旧的 id 写法
+            if (refreshCb is String) {
+              FlutterBridge.instance.emit(refreshCb, {'action': refreshCb, 'type': 'refresh'});
+            } else if (refreshCb is Map) {
+              _emit(refreshCb, null, fallback: p.map, type: 'refresh');
+            } else if (refreshId != null) {
+              FlutterBridge.instance.emit(refreshId.toString(), {'id': refreshId.toString(), 'type': 'refresh'});
             }
             await Future<void>.delayed(Duration(milliseconds: p.i('delay') ?? 600));
           },

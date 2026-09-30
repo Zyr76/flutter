@@ -787,6 +787,13 @@ public final class FlutterLuaBridge {
             Object obj = container.getObject();
             if (obj instanceof ViewGroup) {
                 ViewGroup group = (ViewGroup) obj;
+                // 同一个 FlutterView 被多次 render 时不要重复 addView（会抛 "already has a parent"）
+                if (view.getParent() == group) {
+                    return;
+                }
+                if (view.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) view.getParent()).removeView(view);
+                }
                 group.addView(view,
                         new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT));

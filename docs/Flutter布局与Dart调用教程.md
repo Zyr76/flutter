@@ -24,6 +24,12 @@
 
 ## 1. 快速上手
 
+> 仓库里有两份示例，按需看：
+> * `flutter示例.lua` —— **控件/语法速查**（每个控件怎么用、两种事件写法、弹窗命令）
+> * `flutter应用示例.lua` —— **完整应用骨架**（订单管理：分层组织、页面路由、状态驱动渲染、
+>   异步数据、搜索/分页/弹窗）。想知道「怎么把脚本写成应用」直接看这份。
+>   它有一个不依赖 Android 的冒烟测试：`lua5.3 tools/lua_smoke_test.lua`
+
 ```lua
 require "import"
 import "android.widget.*"
@@ -96,6 +102,11 @@ end
 **信息展示**：`Card`、`ListTile`、`SwitchListTile`、`CheckboxListTile`、`RadioListTile`、`ExpansionTile`、`ExpansionPanelList`、`Chip`/`ActionChip`/`FilterChip`/`ChoiceChip`/`InputChip`、`Tooltip`、`Badge`、`Divider`、`VerticalDivider`、`CircleAvatar`、`RichText`、`SelectableText`、`Table`、`DataTable`、`Stepper`、`Placeholder`、`CircularProgressIndicator`、`LinearProgressIndicator`、`CupertinoActivityIndicator`
 
 **Scaffold 体系**：`Scaffold`（`appBar`/`body`/`drawer`/`endDrawer`/`bottomNavigationBar`/`bottomSheet`/`floatingActionButton`/`floatingActionButtonLocation`/`persistentFooterButtons`…）、`AppBar`（`title`/`leading`/`actions`/`bottom`/`elevation`/`backgroundColor`/`foregroundColor`/`centerTitle`/`toolbarHeight`/`titleSpacing`/`leadingWidth`/`shape`）、`Drawer`、`EndDrawer`、`UserAccountsDrawerHeader`、`BottomNavigationBar`、`NavigationBar`、`NavigationRail`、`NavigationDrawer`、`TabBar`/`TabBarView`/`DefaultTabController`、`BottomAppBar`、`MaterialBanner`、`SnackBar`、`CupertinoNavigationBar`
+
+> **`RefreshIndicator`** 的回调既支持声明式 `onRefresh = "函数名"`（推荐），也兼容 `id` 写法。
+
+> **padding 与 margin 的区别**：`padding` 只有容器类控件（`Container`/`Card`/`Column`/`Row`/`ListView`…）才处理；
+> 其他控件（如 `Text`）想加外边距请用 `margin`（通用层会给几乎所有节点包一层 Padding）。
 
 **弹窗（声明式，可直接放进树里）**：`AlertDialog`、`SimpleDialog`、`Dialog`、`BottomSheet`、`CupertinoAlertDialog`
 
