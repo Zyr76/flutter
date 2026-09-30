@@ -63,7 +63,9 @@ end
 local api = {}
 
 function api.loadUser()
+  print("[应用] 请求用户信息…")
   调用Dart("getUserInfo", { id = 1 }, function(res, err)
+    print("[应用] 用户信息已返回：" .. tostring(res and res.name or err))
     if res and not res.error then store.user = res else toast("获取用户失败：" .. tostring(err)) end
     render()
   end)
@@ -75,7 +77,9 @@ function api.loadOrders(reset)
   if reset then store.page = 1 end
   render()                                    -- 立刻显示加载态
 
+  print("[应用] 请求订单：page=" .. store.page)
   调用Dart("fetchOrders", { page = store.page, size = APP.pageSize }, function(res, err)
+    print("[应用] 订单已返回：" .. tostring(res and res.list and (#res.list .. " 条") or err))
     store.loading = false
     if res and res.list then
       if reset then
@@ -285,13 +289,20 @@ local function ordersPage()
     TextField, hint = "输入订单号/标题，回车搜索", margin = { 12, 8 },
     onSubmitted = "search",
   })
-  if store.loading and #store.orders == 0 then
-    table.insert(body, stateView("正在加载…", "refresh"))
-  elseif #shown == 0 then
-    table.insert(body, stateView(store.keyword == "" and "暂无订单" or "没有匹配的订单", "info"))
-  end
-  table.insert(body, { RefreshIndicator, child = list, onRefresh = "refresh" })
-  if #shown > 0 then
+  if #shown == 0 then
+    -- 空数据：显示占位（占位本身是 Expanded，与下面的列表互斥，避免两个 Expanded 平分空间）
+    local tip = "暂无订单"
+    if store.loading then tip = "正在加载…"
+    elseif store.keyword ~= "" then tip = "没有匹配的订单" end
+    table.insert(body, stateView(tip, store.loading and "refresh" or "info"))
+  else
+    -- 有数据：列表必须包在 Expanded 里！
+    -- Column 里的可滚动组件没有确定高度约束，Flutter 会报
+    -- "Vertical viewport was given unbounded height"，整块列表渲染不出来。
+    table.insert(body, {
+      Expanded,
+      child = { RefreshIndicator, child = list, onRefresh = "refresh" },
+    })
     table.insert(body, {
       Row, mainAxisAlignment = "center", margin = { 0, 12 },
       children = {

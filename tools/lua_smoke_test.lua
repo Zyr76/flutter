@@ -111,8 +111,11 @@ local function lastSpec() return captured.specs[#captured.specs] end
 local function countOrderCards(spec)
   local n = 0
   for _, c in ipairs(spec.body.children or {}) do
-    if type(c) == "table" and c[1] == "RefreshIndicator" then
-      for _, item in ipairs(c.child.children or {}) do
+    -- 列表被包在 Expanded 里（必须先解包）
+    local node = c
+    if type(node) == "table" and node[1] == "Expanded" then node = node.child end
+    if type(node) == "table" and node[1] == "RefreshIndicator" then
+      for _, item in ipairs(node.child.children or {}) do
         if item.onClick and item.onClick.event == "openOrder" then n = n + 1 end
       end
     end

@@ -140,19 +140,26 @@ public final class FlutterLuaBridge {
             public int execute() throws LuaException {
                 final FlutterLua flutter = flutter(context);
                 final String name = L.toString(2);
-                int top = L.getTop();
 
-                String args = null;
+                // 参数布局：1=JavaFunction 自身（luajava 约定），2=方法名，3=参数表（可省），4=回调（可省）
+                //
+                // 刻意**不**用 L.getTop() 判断参数个数：栈顶受元表查找等因素影响未必
+                // 等于「1 + 参数个数」，一旦判错就会把「带回调的异步调用」当成同步调用，
+                // 表现为「回调永远不执行」。改成按位置探测，越界的位置 isNoneOrNil() 会返回 true。
                 int cbIndex = -1;
-                if (top >= 4 && L.isFunction(4)) {
-                    cbIndex = 4;
-                    if (!L.isNoneOrNil(3)) {
-                        args = LuaJson.encode(L, 3);
+                for (int i = 4; i >= 3; i--) {
+                    if (L.isFunction(i)) {
+                        cbIndex = i;
+                        break;
                     }
-                } else if (top >= 3 && L.isFunction(3)) {
-                    cbIndex = 3;
-                } else if (top >= 3 && !L.isNoneOrNil(3)) {
-                    args = LuaJson.encode(L, 3);
+                }
+                String args = null;
+                for (int i = 3; i <= 4; i++) {
+                    if (i == cbIndex || L.isNoneOrNil(i)) {
+                        continue;
+                    }
+                    args = LuaJson.encode(L, i);
+                    break;
                 }
 
                 if (cbIndex > 0) {
