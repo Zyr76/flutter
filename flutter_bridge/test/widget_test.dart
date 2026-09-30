@@ -593,6 +593,32 @@ void main() {
     expect((e['data'] as Map)['value'], true);
   });
 
+  testWidgets('TextField 回车（onSubmitted）会发出事件（回归）', (tester) async {
+    final events = <Map<String, dynamic>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      FlutterBridge.channel,
+      (MethodCall call) async {
+        if (call.method == 'nativeEvent') {
+          events.add((jsonDecode(call.arguments as String) as Map).cast<String, dynamic>());
+        }
+        return null;
+      },
+    );
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'TextField', 'hint': '搜一下', 'onSubmitted': 'search'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+
+    await tester.enterText(find.byType(TextField), 'abc');
+    await tester.testTextInput.receiveAction(TextInputAction.done);   // 模拟按回车
+    await tester.pump();
+
+    expect(events.any((e) => e['name'] == 'search'), isTrue, reason: '应发出 name=search 的事件，实际：$events');
+    final e = events.firstWhere((x) => x['name'] == 'search');
+    expect((e['data'] as Map)['value'], 'abc', reason: '事件里应带上输入的文字');
+  });
+
   testWidgets('Switch 带 id：拖动会发出 change 事件（回归）', (tester) async {
     final events = <Map<String, dynamic>>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
