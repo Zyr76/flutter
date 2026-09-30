@@ -707,6 +707,10 @@ public final class FlutterLuaBridge {
                 } catch (Exception ignored) {
                 }
                 boolean handled = false;
+                boolean fnHandled = false;
+                boolean idHandled = false;
+                boolean anyHandled = false;
+                String fnType = null;
                 // 广播给该 context 下的所有 LuaState：主脚本 + 各 thread/task。
                 // 没定义处理器的状态自然什么都不做。
                 for (LuaState L : states) {
@@ -720,15 +724,18 @@ public final class FlutterLuaBridge {
                             if (name != null && !name.isEmpty()) {
                                 // 1) AndroLua 风格：事件名 -> 同名全局 Lua 函数
                                 LuaObject fn = L.getLuaObject(name);
+                                if (fnType == null) {
+                                    fnType = String.valueOf(fn); // nil / Lua Table / Lua Function …
+                                }
                                 if (fn.isFunction()) {
                                     fn.push();
                                     LuaJson.pushJava(L, o.opt("data"));
                                     pcallChecked(L, 1, "事件 " + name);
-                                    handled = true;
+                                    fnHandled = true;
                                 }
                                 // 2) id 句柄回调：h.onClick = fn / h.onChange = fn
                                 if (dispatchNodeHandler(L, name, o)) {
-                                    handled = true;
+                                    idHandled = true;
                                 }
                             }
 
@@ -741,20 +748,23 @@ public final class FlutterLuaBridge {
                                 any.push();
                                 LuaJson.pushJson(L, json);
                                 pcallChecked(L, 1, "onFlutterEvent");
-                                handled = true;
+                                anyHandled = true;
                             }
                         } catch (Exception e) {
                             logError("处理 Flutter 事件失败: " + json, e);
                         }
                     }
                 }
+                handled = fnHandled || idHandled || anyHandled;
 
                 // 诊断：开了 flutterDebug(true) 就报告每个事件；否则只在“没人处理”时提示一次，
                 // 避免“点了没反应、又没有任何线索”。
                 LuaState first = states.isEmpty() ? null : states.get(0);
                 if (DEBUG_EVENTS) {
                     luaPrint(first, "[Flutter] 事件 name=" + evtName + " type=" + evtType
-                            + " handled=" + handled + " states=" + states.size());
+                            + " fn(" + evtName + ")=" + fnType
+                            + " fn命中=" + fnHandled + " id命中=" + idHandled + " 总监听=" + anyHandled
+                            + " states=" + states.size());
                     if (first != null) {
                         synchronized (first) {
                             luaPrint(first, "[Flutter] 句柄表：" + flutterHandlersSummary(first));

@@ -2118,7 +2118,7 @@ class Renderer {
   static void _change(Props p, dynamic value) {
     final c = p['onChange'];
     if (c != null) {
-      _emit(c, value, fallback: p.map);
+      _emit(c, value, fallback: p.map, type: 'change');
       return;
     }
     final id = p['id'];
@@ -2133,7 +2133,7 @@ class Renderer {
     return () {
       if (action is String) {
         // 字符串形式：只发事件，事件名 = 该名字（AndroLua 风格：点击调用同名 Lua 函数）
-        FlutterBridge.instance.emit(action, {'action': action});
+        FlutterBridge.instance.emit(action, {'action': action, 'type': 'click'});
       } else if (action is Map) {
         final m = action.cast<String, dynamic>();
         final method = (m['call'] ?? m['method'] ?? '').toString();
@@ -2148,13 +2148,15 @@ class Renderer {
         final event = (m['event'] ?? m['emit'] ?? method).toString();
         FlutterBridge.instance.emit(
           event.isEmpty ? 'onTap' : event,
-          {'action': method, 'args': args, 'result': res},
+          {'action': method, 'args': args, 'result': res, 'type': 'click'},
         );
       }
     };
   }
 
-  static void _emit(dynamic spec, dynamic value, {Map<String, dynamic>? fallback}) {
+  /// 发出事件。type 会放进 data.type（'change' / 'click'），方便接收方统一判断；
+  /// 以前只有 id 句柄分支带 type，声明式分支不带，导致 data.type 为 nil。
+  static void _emit(dynamic spec, dynamic value, {Map<String, dynamic>? fallback, String? type}) {
     final method = spec is Map ? (spec['call'] ?? spec['method'])?.toString() : null;
     // 事件名：显式 event/emit > 字符串本身 > 方法名 > 'onChange'
     final name = spec is Map
@@ -2168,7 +2170,7 @@ class Renderer {
     }
     FlutterBridge.instance.emit(
       (name == null || name.isEmpty) ? 'onChange' : name,
-      {'value': value, 'result': res},
+      {'value': value, 'result': res, 'type': ?type},
     );
   }
 

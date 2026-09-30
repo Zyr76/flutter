@@ -17,6 +17,7 @@ activity.setTitle("AndroLua + Flutter")
 --   [Flutter] 事件 name=sw type=change handled=true states=1
 -- handled=false 表示没人处理这个事件。调试完删掉这行即可。
 flutterDebug(true)
+print("[示例] 脚本开始执行")
 
 -- ---------- 原生区（顶部提示 + 底部按钮）----------
 activity.setContentView(loadlayout{
@@ -75,6 +76,7 @@ hint.setPadding(24, 24, 24, 24)
 }, flutterHost)
 
 -- ---------- 具体回调：id 句柄 ----------
+print("[示例] 渲染已提交，开始定义回调")
 
 -- h.onClick = fn（等价于 function h.onClick() ... end）
 function btn.onClick()
@@ -113,11 +115,20 @@ end
 -- 输出示例：sw2 => onChange(function) | btn => onClick(function) | dlg => onClick(function)
 -- 如果某个 id 显示 (空)，说明那个回调没写进去（比如它前面的代码报错了，后面的语句没执行）
 flutterHandlers()
+print("[示例] 所有回调已定义完毕")
 
 -- ---------- 总监听：所有事件都会到这里（不会打断上面的具体回调）----------
+-- 这里额外做一次“手动分发”：不依赖句柄、也不依赖同名函数，必定能工作。
+-- 如果你发现 flutterHandlers() 显示 (空)、上面的回调不执行，用这段就能先把功能跑起来。
 function 收到Flutter事件(e)
   local name = e and e.name or "?"
+  local data = e and e.data
   hint.setText("Flutter 事件：" .. name)
+  if name == "sw2" and data and data.type == "change" then
+    hint.setText("开关2：" .. tostring(data.value))
+  elseif name == "onSwChanged" then
+    hint.setText("开关：" .. tostring(data and data.value))
+  end
 end
 
 -- ---------- 原生按钮 -> Dart 逻辑 ----------
