@@ -177,6 +177,18 @@ end
 
 英文名等价：`flutterShowDialog` / `flutterShowBottomSheet` / `flutterShowSnackBar` / `flutterShowDatePicker` / `flutterShowTimePicker` / `flutterCloseDialog`。
 
+## 6.5 事件调试
+
+```lua
+flutterDebug(true)    -- 打开后每个事件都打印：name / type / handled / 状态数
+```
+
+输出形如 `[Flutter] 事件 name=sw type=change handled=true states=1`。
+`handled=false` 且控制台还会额外提示“没有任何处理器”，说明事件到了但没人为它写回调（检查 id 拼写、是否写在 `id.onChange` 上）。
+**什么都没打印** = 事件压根没到原生层（检查是否装了新 APK、控件是否真的触发）。
+
+另外可以随时回读句柄上的回调：`print(sw.onChange)`，是 `function: ...` 说明注册成功。
+
 ---
 
 ## 7. 与 Dart 通信
@@ -229,6 +241,8 @@ end)
 | `loadlayout.lua: attempt to call a string value` | 原生布局里写了 Flutter 控件名 → 改用 Android 类名 |
 | `attempt to index a nil value (global 'xxx')` | 该 id 未成功生成全局句柄（非法/保留字/被占用）→ 看控制台提示，或改用 `flutterNode("xxx")` |
 | 报 `[dartCall] ...` 提示 | 那是提示不是错误，用于说明 id 未绑定或主线程同步调用的替代方案 |
+| 事件“没有反应” | 先确认 APK 是最新的；然后 `flutterDebug(true)` 打开事件日志：看到 `handled=true` 说明回调已执行；看到 `handled=false` 说明事件到了但没人处理；什么都没看到说明事件没到原生侧 |
+| 想看 id 回调到底注册上没有 | `print(sw.onChange)` —— 是 `function: 0x...` 说明注册成功，`nil` 说明没写进去 |
 | `attempt to index a nil value (global 'hint')` | 在 `thread{}` 里访问了主脚本的全局变量——thread 是独立 Lua 状态。改用异步 `调用Dart(..., 回调)` |
 | 调用过 thread 后 id 回调不触发 | 已修复（事件现在广播给该 Activity 下所有 Lua 状态）|
 | 设置了属性但没生效 | 检查属性名是否为 Flutter 原名；不认识的 Dart 值会退回默认值 |

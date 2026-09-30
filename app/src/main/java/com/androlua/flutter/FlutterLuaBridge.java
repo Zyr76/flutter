@@ -332,6 +332,17 @@ public final class FlutterLuaBridge {
             }
         };
         reg(closeDialog, "flutterCloseDialog", "关闭对话框");
+
+        // ---- flutterDebug(true/false) ---- 事件调试开关，把每个事件的到达/处理情况打到控制台
+        JavaFunction debug = new JavaFunction(L) {
+            @Override
+            public int execute() throws LuaException {
+                DEBUG_EVENTS = !L.isNoneOrNil(2) && L.toBoolean(2);
+                luaPrint(L, DEBUG_EVENTS ? "[Flutter] 事件调试：开" : "[Flutter] 事件调试：关");
+                return 0;
+            }
+        };
+        reg(debug, "flutterDebug", "Flutter调试", "调试Flutter事件");
     }
 
     /** src 是否是需要拼成绝对路径的“纯文件名/相对路径”。 */
@@ -538,15 +549,15 @@ public final class FlutterLuaBridge {
         return ok;
     }
 
-    /** 把事件分发给对应 id 句柄上注册的回调（onClick / onChange）。 */
-    private static void dispatchNodeHandler(LuaState L, String id, JSONObject event) throws LuaException {
+    /** 把事件分发给对应 id 句柄上注册的回调（onClick / onChange）。返回是否真的调用了回调。 */
+    private static boolean dispatchNodeHandler(LuaState L, String id, JSONObject event) throws LuaException {
         LuaObject handlers = L.getLuaObject("__flutter_handlers");
         if (handlers == null || !handlers.isTable()) {
-            return;
+            return false;
         }
         LuaObject entry = handlers.getField(id);
         if (entry == null || !entry.isTable()) {
-            return;
+            return false;
         }
         String type = event.optString("type", "");
         String[] keys = "change".equals(type)
@@ -558,9 +569,10 @@ public final class FlutterLuaBridge {
                 fn.push();
                 LuaJson.pushJava(L, event.opt("data"));
                 pcallChecked(L, 1, "id 句柄回调 " + id + "." + k);
-                return;
+                return true;
             }
         }
+        return false;
     }
 
     private static void reg(JavaFunction f, String... names) throws LuaException {
@@ -577,11 +589,38 @@ public final class FlutterLuaBridge {
         }
     }
 
-    /** 执行 Lua 函数并检查错误，失败时记录（不再静默吞掉）。 */
+    /** 事件调试开关：Lua 里调 flutterDebug(true) / Flutter调试(true) 打开，会把每个事件的到达与处理情况打到控制台。 */
+    private static volatile boolean DEBUG_EVENTS = false;
+
+    /** 把消息打到 Lua 控制台（走 Lua 的 print；失败不影响主流程）。 */
+    private static void luaPrint(LuaState L, String msg) {
+        if (L == null) return;
+        final int top = L.getTop();
+        try {
+            L.getGlobal("print");
+            if (L.isFunction(-1)) {
+                L.pushString(msg);
+                if (L.pcall(1, 0, 0) != 0) {
+                    L.pop(1);
+                }
+            } else {
+                L.pop(1);
+            }
+        } catch (Throwable ignored) {
+            // 诊断输出失败不应影响主流程
+        } finally {
+            int extra = L.getTop() - top;
+            if (extra > 0) L.pop(extra);
+        }
+    }
+
+    /** 执行 Lua 函数并检查错误，失败时记录到 logcat【和 Lua 控制台】（不再静默吞掉）。 */
     private static void pcallChecked(LuaState L, int nargs, String what) {
         if (L.pcall(nargs, 0, 0) != 0) {
-            logError(what + " 执行出错: " + L.toString(-1), null);
+            String err = L.toString(-1);
             L.pop(1);
+            logError(what + " 执行出错: " + err, null);
+            luaPrint(L, "[Flutter] " + what + " 执行出错: " + err);
         }
     }
 
@@ -613,9 +652,20 @@ public final class FlutterLuaBridge {
         flutter.setEventSink(new FlutterLua.EventSink() {
             @Override
             public void onFlutterEvent(String json) {
+                final List<LuaState> states = statesOf(context);
+                String evtName = null;
+                String evtType = null;
+                try {
+                    org.json.JSONObject probe = new org.json.JSONObject(json);
+                    evtName = probe.optString("name", null);
+                    org.json.JSONObject d = probe.optJSONObject("data");
+                    evtType = d == null ? null : d.optString("type", null);
+                } catch (Exception ignored) {
+                }
+                boolean handled = false;
                 // 广播给该 context 下的所有 LuaState：主脚本 + 各 thread/task。
                 // 没定义处理器的状态自然什么都不做。
-                for (LuaState L : statesOf(context)) {
+                for (LuaState L : states) {
                     synchronized (L) {
                         try {
                             org.json.JSONObject o = new org.json.JSONObject(json);
@@ -630,9 +680,12 @@ public final class FlutterLuaBridge {
                                     fn.push();
                                     LuaJson.pushJava(L, o.opt("data"));
                                     pcallChecked(L, 1, "事件 " + name);
+                                    handled = true;
                                 }
                                 // 2) id 句柄回调：h.onClick = fn / h.onChange = fn
-                                dispatchNodeHandler(L, name, o);
+                                if (dispatchNodeHandler(L, name, o)) {
+                                    handled = true;
+                                }
                             }
 
                             // 3) 总监听：定义了 onFlutterEvent / 收到Flutter事件 就会收到所有事件（不再阻断上面）
@@ -644,11 +697,23 @@ public final class FlutterLuaBridge {
                                 any.push();
                                 LuaJson.pushJson(L, json);
                                 pcallChecked(L, 1, "onFlutterEvent");
+                                handled = true;
                             }
                         } catch (Exception e) {
                             logError("处理 Flutter 事件失败: " + json, e);
                         }
                     }
+                }
+
+                // 诊断：开了 flutterDebug(true) 就报告每个事件；否则只在“没人处理”时提示一次，
+                // 避免“点了没反应、又没有任何线索”。
+                LuaState first = states.isEmpty() ? null : states.get(0);
+                if (DEBUG_EVENTS) {
+                    luaPrint(first, "[Flutter] 事件 name=" + evtName + " type=" + evtType
+                            + " handled=" + handled + " states=" + states.size());
+                } else if (!handled && evtName != null && !evtName.isEmpty()) {
+                    luaPrint(first, "[Flutter] 事件 \"" + evtName + "\" 没有任何处理器；"
+                            + "可在同名全局函数、id 句柄的 onClick/onChange、或 收到Flutter事件 里处理");
                 }
             }
         });

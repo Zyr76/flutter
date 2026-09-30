@@ -569,6 +569,52 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('SwitchListTile 带 id：切换会发出 change 事件（回归）', (tester) async {
+    final events = <Map<String, dynamic>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      FlutterBridge.channel,
+      (MethodCall call) async {
+        if (call.method == 'nativeEvent') {
+          events.add((jsonDecode(call.arguments as String) as Map).cast<String, dynamic>());
+        }
+        return null;
+      },
+    );
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'SwitchListTile', 'title': '开关', 'value': false, 'id': 'sw'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(events.any((e) => e['name'] == 'sw'), isTrue, reason: '应发出 name=sw 的事件，实际：$events');
+    final e = events.firstWhere((x) => x['name'] == 'sw');
+    expect((e['data'] as Map)['type'], 'change');
+    expect((e['data'] as Map)['value'], true);
+  });
+
+  testWidgets('Switch 带 id：拖动会发出 change 事件（回归）', (tester) async {
+    final events = <Map<String, dynamic>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      FlutterBridge.channel,
+      (MethodCall call) async {
+        if (call.method == 'nativeEvent') {
+          events.add((jsonDecode(call.arguments as String) as Map).cast<String, dynamic>());
+        }
+        return null;
+      },
+    );
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'Switch', 'value': false, 'id': 'sw2'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(events.any((e) => e['name'] == 'sw2' && (e['data'] as Map)['type'] == 'change'), isTrue,
+        reason: '应发出 name=sw2/type=change 的事件，实际：$events');
+  });
+
   testWidgets('新增控件：Cupertino / NavigationDrawer / MaterialBanner / SearchBar / ListWheel', (tester) async {
     final w = Renderer.build(jsonEncode({
       '1': 'SingleChildScrollView',

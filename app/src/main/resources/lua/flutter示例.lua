@@ -13,6 +13,11 @@ import "android.view.*"
 
 activity.setTitle("AndroLua + Flutter")
 
+-- 事件调试开关：打开后每个 Flutter 事件都会在控制台打印
+--   [Flutter] 事件 name=sw type=change handled=true states=1
+-- handled=false 表示没人处理这个事件。调试完删掉这行即可。
+flutterDebug(true)
+
 -- ---------- 原生区（顶部提示 + 底部按钮）----------
 activity.setContentView(loadlayout{
   LinearLayout, orientation = "vertical", backgroundColor = "0xffffffff",
