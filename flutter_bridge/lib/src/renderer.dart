@@ -1829,6 +1829,12 @@ class Renderer {
       final t = p.s('tooltip');
       if (t != null && t.isNotEmpty) out = Tooltip(message: t, child: out);
     }
+    // 通用点击：控件自身不处理 onTap/onClick 时（如 Card / Container / Text / Row），
+    // 这里统一包一层 GestureDetector——否则「给卡片写了 onClick 却没反应」很迷惑。
+    if (!_noTapWrap.contains(p.type)) {
+      final cb = _voidCallback(p['onTap'], fallback: p.map);
+      if (cb != null) out = GestureDetector(onTap: cb, child: out);
+    }
     final w = p['width'];
     final h = p['height'];
     if (w != null || h != null) {
@@ -1853,6 +1859,15 @@ class Renderer {
     'bottomnavigationbar', 'navigationbar', 'navigationrail', 'tabbar',
     'divider', 'verticaldivider',
     'dialog', 'alertdialog', 'simpledialog', 'bottomsheet',
+  };
+  // 自己处理点击的控件（列进来避免包裹后一次点击发两次事件）
+  static const Set<String> _noTapWrap = {
+    'inkwell', 'gesturedetector',
+    'elevatedbutton', 'textbutton', 'filledbutton', 'outlinedbutton', 'materialbutton',
+    'cupertinobutton', 'iconbutton', 'floatingactionbutton',
+    'listtile', 'switchlisttile', 'checkboxlisttile', 'radiolisttile', 'expansiontile',
+    'chip', 'actionchip', 'filterchip', 'choicechip', 'inputchip',
+    'dropdownbutton', 'dropdownbuttonformfield',
   };
   static const Set<String> _noTooltipWrap = {
     'tooltip', 'iconbutton', 'floatingactionbutton', 'chip',

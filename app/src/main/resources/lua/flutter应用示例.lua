@@ -215,6 +215,8 @@ local function orderTile(o)
   return {
     Card,
     margin = { 0, 6 },
+    -- 通用点击：onClick/onTap 对任意控件都生效（Card/Container/Row/Text… 都行），
+    -- 不只是按钮和 ListTile。想带参数就用 { event=..., args=... }。
     onClick = { event = "openOrder", args = { id = o.id } },
     child = {
       Row, gap = 12,
@@ -253,6 +255,31 @@ local function appBar(title, opts)
                       onClick = opts.action.handler } }
   end
   return bar
+end
+
+-- 底部导航（两个 Tab 共用一份，不重复写）
+local function bottomNav()
+  return {
+    BottomNavigationBar,
+    currentIndex = store.tab,
+    items = {
+      { icon = "dashboard", label = "订单" },
+      { icon = "person", label = "我的" },
+    },
+    onTap = "switchTab",
+  }
+end
+
+-- 页面外壳：统一背景/顶栏/底部导航，页面函数只提供「标题 + 内容 + 差异」
+local function page(title, body, opts)
+  opts = opts or {}
+  return {
+    Scaffold,
+    backgroundColor = "#F5F5F5",
+    appBar = appBar(title, opts.bar),
+    body = body,
+    bottomNavigationBar = opts.nav and bottomNav() or nil,
+  }
 end
 
 -- 订单页
@@ -314,30 +341,15 @@ local function ordersPage()
     })
   end
 
-  return {
-    Scaffold,
-    backgroundColor = "#F5F5F5",
-    appBar = appBar(APP.title, { action = { icon = "refresh", tip = "刷新", handler = "reload" } }),
-    body = { Column, children = body },
-    bottomNavigationBar = {
-      BottomNavigationBar,
-      currentIndex = store.tab,
-      items = {
-        { icon = "dashboard", label = "订单" },
-        { icon = "person", label = "我的" },
-      },
-      onTap = "switchTab",
-    },
-  }
+  return page(APP.title, { Column, children = body }, {
+    nav = true,
+    bar = { action = { icon = "refresh", tip = "刷新", handler = "reload" } },
+  })
 end
 
 -- 我的页
 local function minePage()
-  return {
-    Scaffold,
-    backgroundColor = "#F5F5F5",
-    appBar = appBar("我的"),
-    body = { ListView, padding = 12, children = {
+  local body = { ListView, padding = 12, children = {
       card({
         { Row, gap = 12, children = {
           { CircleAvatar, radius = 24, backgroundColor = APP.primary,
@@ -359,31 +371,17 @@ local function minePage()
         keyValue("订单数", #store.orders),
         keyValue("更新时间", store.updatedAt),
       }),
-    } },
-    bottomNavigationBar = {
-      BottomNavigationBar,
-      currentIndex = store.tab,
-      items = {
-        { icon = "dashboard", label = "订单" },
-        { icon = "person", label = "我的" },
-      },
-      onTap = "switchTab",
-    },
-  }
+    } }
+  return page("我的", body, { nav = true })
 end
 
 -- 详情页
 local function detailPage()
   local o = store.current
   if not o then
-    return { Scaffold, appBar = appBar("详情", { back = true }),
-             body = { Center, child = { Text, text = "没有选中订单" } } }
+    return page("详情", { Center, child = { Text, text = "没有选中订单" } }, { bar = { back = true } })
   end
-  return {
-    Scaffold,
-    backgroundColor = "#F5F5F5",
-    appBar = appBar("订单详情", { back = true }),
-    body = { ListView, padding = 12, children = {
+  local body = { ListView, padding = 12, children = {
       card({
         { Text, text = tostring(o.title), fontSize = 20, fontWeight = "bold" },
         { Text, text = fmtAmount(o.amount), fontSize = 24, color = "#E53935" },
@@ -397,8 +395,8 @@ local function detailPage()
           onClick = "cancelOrder",
           style = { backgroundColor = "#E53935", foregroundColor = "#FFFFFF" } },
       }),
-    } },
-  }
+    } }
+  return page("订单详情", body, { bar = { back = true } })
 end
 
 -- 注册到路由表

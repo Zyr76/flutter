@@ -86,6 +86,7 @@ end
 | `visible` | `false` 时隐藏（`Visibility`）|
 | `opacity` | 0~1 透明度 |
 | `tooltip` | 长按提示 |
+| `onClick` / `onTap` | **通用点击**：任何控件都能写（Card/Container/Text/Row…），不只是按钮 |
 | `child` / `children` | 子节点（单个 / 列表）|
 
 **文本 `Text`**：`text`、`fontSize`、`color`、`fontWeight`（`bold`/`400`/`700`）、`fontStyle`（`italic`）、`decoration`（`underline`/`lineThrough`/`overline`）、`decorationColor`、`decorationStyle`（`solid`/`dashed`/`double`/`dotted`/`wavy`）、`fontFamily`、`fontFamilyFallback`、`shadows`、`letterSpacing`、`wordSpacing`、`height`（行高倍数）、`textAlign`、`textDirection`、`maxLines`、`softWrap`、`overflow`、`textScaleFactor`、`textWidthBasis`、`locale`、`selectionColor`、`semanticsLabel`

@@ -633,6 +633,34 @@ void main() {
     expect(tester.widget<TextField>(find.byType(TextField)).maxLines, 3);
   });
 
+  testWidgets('通用点击：Card 上写 onClick 也能响应（且只响应一次）', (tester) async {
+    final events = <Map<String, dynamic>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      FlutterBridge.channel,
+      (MethodCall call) async {
+        if (call.method == 'nativeEvent') {
+          events.add((jsonDecode(call.arguments as String) as Map).cast<String, dynamic>());
+        }
+        return null;
+      },
+    );
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {
+        '1': 'Card',
+        'onClick': {'event': 'openOrder', 'args': {'id': 3}},
+        'child': {'1': 'Text', 'text': '订单 #3'},
+      },
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    await tester.tap(find.text('订单 #3'));
+    await tester.pump();
+
+    final hits = events.where((e) => e['name'] == 'openOrder').toList();
+    expect(hits.length, 1, reason: '应恰好发出一次事件（不能重复），实际：$events');
+    expect((hits.first['data'] as Map)['args']['id'], 3, reason: 'args 应原样带到事件里');
+  });
+
   testWidgets('Switch 带 id：拖动会发出 change 事件（回归）', (tester) async {
     final events = <Map<String, dynamic>>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
