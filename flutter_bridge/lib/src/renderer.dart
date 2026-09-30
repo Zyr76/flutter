@@ -2581,7 +2581,7 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
       obscureText: obscure,
       autocorrect: p.b('autocorrect', true),
       enableSuggestions: p.b('enableSuggestions', true),
-      maxLines: obscure ? 1 : p.i('maxLines'),
+      maxLines: obscure ? 1 : (p.i('maxLines') ?? 1),
       minLines: p.i('minLines'),
       maxLength: p.i('maxLength'),
       readOnly: p.b('readOnly'),

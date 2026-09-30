@@ -614,9 +614,23 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);   // 模拟按回车
     await tester.pump();
 
+    // 默认必须是单行：maxLines=null 在 Flutter 里表示“不限行数”（多行），
+    // 多行输入框里回车是换行、永远不会触发 onSubmitted。
+    expect(tester.widget<TextField>(find.byType(TextField)).maxLines, 1,
+        reason: '未写 maxLines 时应默认为单行，否则回车会换行而不是提交');
+
     expect(events.any((e) => e['name'] == 'search'), isTrue, reason: '应发出 name=search 的事件，实际：$events');
     final e = events.firstWhere((x) => x['name'] == 'search');
     expect((e['data'] as Map)['value'], 'abc', reason: '事件里应带上输入的文字');
+  });
+
+  testWidgets('TextField 显式 maxLines 仍可多行（回车不提交）', (tester) async {
+    final w = Renderer.build(jsonEncode({
+      '1': 'Column',
+      '2': {'1': 'TextField', 'hint': '备注', 'maxLines': 3, 'onSubmitted': 'note'},
+    }));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: w)));
+    expect(tester.widget<TextField>(find.byType(TextField)).maxLines, 3);
   });
 
   testWidgets('Switch 带 id：拖动会发出 change 事件（回归）', (tester) async {

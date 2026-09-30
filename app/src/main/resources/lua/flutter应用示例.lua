@@ -286,7 +286,9 @@ local function ordersPage()
     },
   })
   table.insert(body, {
-    TextField, hint = "输入订单号/标题，回车搜索", margin = { 12, 8 },
+    -- maxLines = 1：单行输入框，回车才会触发 onSubmitted；
+    -- 不写也默认单行，但多行输入框（maxLines > 1 或不限行数）里回车=换行、不会提交。
+    TextField, hint = "输入订单号/标题，回车搜索", margin = { 12, 8 }, maxLines = 1,
     onSubmitted = "search",
   })
   if #shown == 0 then
