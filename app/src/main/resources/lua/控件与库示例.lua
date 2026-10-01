@@ -7,7 +7,6 @@
 --   FlexboxLayout    流式布局（FlowLayout）
 --   Glide            图片加载（网络 / 本地）
 --   OkHttp           网络请求
---   SoraEditor       代码编辑器（io.github.rosemoe.sora.widget.CodeEditor）
 --   LuaWebView       网页
 --   LuaEditor        内置代码编辑器
 --
@@ -120,22 +119,6 @@ local function pageNet()
 end
 
 -- ============================================================
--- 5) SoraEditor 代码编辑器（io.github.rosemoe.sora.widget.CodeEditor）
--- ============================================================
-local function pageSora()
-  -- 用 sora.lua 封装：SoraEditor + TextMate 的 Lua 语法高亮
-  return require("sora")([[
--- SoraEditor + TextMate Lua 高亮
-local function hello(name)
-    print("hello, " .. name)   -- 注释
-end
-hello("AndroLua")
-local n = 123
-if n then return nil end
-]])
-end
-
--- ============================================================
 -- 6) LuaWebView 网页
 -- ============================================================
 local function pageWeb()
@@ -167,7 +150,6 @@ local pages = {
   { "流式布局", pageFlow },
   { "图片", pageImage },
   { "网络", pageNet },
-  { "Sora编辑器", pageSora },
   { "网页", pageWeb },
   { "编辑器", pageEditor },
 }
