@@ -42,6 +42,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import com.androlua.flutter.FlutterLua;
 import com.androlua.flutter.FlutterLuaBridge;
+import com.androlua.plugin.PluginBridge;
 import android.view.ViewGroup.LayoutParams;
 import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
@@ -1531,6 +1532,7 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
         call.register("call");
 
         FlutterLuaBridge.register(L, this);
+        PluginBridge.register(L, this);
 
     }
 

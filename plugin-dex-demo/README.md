@@ -37,7 +37,8 @@ Androlua/
 │   ├── AndroidManifest.xml                         ← ① 宿主 Manifest（新增 ProxyActivity 声明）
 │   ├── res/values/ids.xml                          ← 新增：Fragment 容器 id（恢复用）
 │   ├── java/com/androlua/plugin/
-│   │   └── ProxyActivity.java                      ← ② 宿主代理 Activity（DexClassLoader + Fragment 容器）
+│   │   ├── ProxyActivity.java                      ← ② 宿主代理 Activity（DexClassLoader + Fragment 容器）
+│   │   └── PluginBridge.java                        ← 把「打开Dex页面」注册成 Lua 全局函数（脚本侧一行调用）
 │   └── resources/lua/
 │       └── 插件dex示例.lua                          ← ④ main.lua：Lua 启动 dex 页面的代码
 └── plugin-dex-demo/
@@ -54,6 +55,7 @@ Androlua/
 | --- | --- |
 | 1. 宿主 AndroidManifest | `app/src/main/AndroidManifest.xml` |
 | 2. ProxyActivity | `app/src/main/java/com/androlua/plugin/ProxyActivity.java` |
+| 2b. Lua 全局函数 | `app/src/main/java/com/androlua/plugin/PluginBridge.java` |
 | 3. 示例 Fragment | `plugin-dex-demo/plugin/com/example/plugin/DemoFragment.java` |
 | 4. main.lua | `app/src/main/resources/lua/插件dex示例.lua` |
 | 5. 编译步骤 | `plugin-dex-demo/build_dex.sh` + 本文第五、六节 |
@@ -109,6 +111,19 @@ new DexClassLoader(dexPath, optDir, null, getClassLoader());
 
 Intent extra 只支持基本类型。Lua 的数字统一按 `double` 传；插件侧用
 `((Number) args.get("count")).intValue()` 兼容 int/long/float，避免 `getInt()` 取不到值。
+（注：`PluginBridge` 已把整数按 `int` 存进 Intent，所以直接 `getInt()` 也能取到。）
+
+### 6. Lua 侧只留一行：`打开Dex页面`
+
+组装 Intent、版本兼容（NEW_TASK / LAUNCH_ADJACENT）、主线程启动、异常提示全部收进
+`PluginBridge`（在 `LuaActivity.initLua` 里注册），脚本侧只需：
+
+```lua
+打开Dex页面(dex路径, Fragment类名 [, 参数表])
+```
+
+参数表里 `title/标题`、`orientation/方向`、`adjacent/分屏`、`newTask/新任务` 是控制项，
+其余键原样作为业务参数传给 Fragment。别名：`加载Dex页面` / `dexPage` / `openDexPage`。
 
 ---
 
