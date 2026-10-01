@@ -6,6 +6,7 @@ material = "1.13.0"
 constraintlayout = "2.2.1"
 apksig = "8.13.0"
 chaquopy = "17.0.0"
+splashscreen = "1.0.1"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -17,3 +18,4 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 apksig = { group = "com.android.tools.build", name = "apksig", version.ref = "apksig" }
+androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }

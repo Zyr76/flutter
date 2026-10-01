@@ -63,6 +63,8 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.apksig)
+    // 接管 Android 12+ 系统强制的那层启动画面（背景色 / 图标），见 SplashTheme
+    implementation(libs.androidx.splashscreen)
 
     // AndroLua 可用的 Android 控件库（loadlayout 里 import 后即可用）
     implementation("androidx.recyclerview:recyclerview:1.3.2")

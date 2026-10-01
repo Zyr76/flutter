@@ -13,4 +13,20 @@
   <style name="PluginTheme" parent="app_theme">
     <item name="android:windowDisablePreview">true</item>
   </style>
+
+  <!--
+    启动图主题（Welcome 用）：接管 Android 12+ 系统强制的那层 splash。
+    系统那层只能「背景色 + 居中图标」、做不了全屏图；这里把背景设成与启动图顶部同色、
+    图标设成透明——于是看不到系统图标，只剩一块同色底，紧接着启动图接管，观感上是一屏。
+    postSplashScreenTheme 是 splash 结束后的主题，窗口背景先保持同色，避免中间闪别的颜色。
+  -->
+  <style name="SplashTheme" parent="Theme.SplashScreen">
+    <item name="windowSplashScreenBackground">@color/splash_background</item>
+    <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_transparent</item>
+    <item name="postSplashScreenTheme">@style/SplashPostTheme</item>
+  </style>
+
+  <style name="SplashPostTheme" parent="app_theme">
+    <item name="android:windowBackground">@color/splash_background</item>
+  </style>
 </resources>

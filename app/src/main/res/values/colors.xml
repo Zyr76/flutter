@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
+    <!--
+        启动图主题里“系统那层 splash”的背景色。
+        取值 = assets/res/splash_screen.png 顶部区域的平均色，用来和启动图无缝衔接：
+        系统只允许「背景色 + 居中图标」，做不了全屏图；把背景调成与图顶部同色、
+        图标设成透明，就看不到系统图标了，紧接着启动图接管，观感上就是一屏。
+        换图后如果顶部颜色变了，改这里即可。
+    -->
+    <color name="splash_background">#FF524C3F</color>
 </resources>

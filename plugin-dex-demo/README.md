@@ -257,15 +257,20 @@ cd plugin-dex-demo && ./build_dex.sh --push     # 编译并推到 /sdcard/plugin
 
 ---
 
-## 八、AndroLua 启动图（全屏图片、无文字）
+## 八、启动图（一屏、全屏图片、无文字）
 
-启动页是 `com.androlua.Welcome`，显示**一张全屏图片、无任何文字**：
+启动页是 `com.androlua.Welcome`。Android 12+ 会**强制**加一层系统 splash（背景色 + 居中应用图标），
+谁也去掉不上；本项目的做法是把它**接管**成和启动图一致，使观感上只剩一屏：
 
-- 启动图文件：`app/src/main/assets/res/splash_screen.png`；`Welcome.onCreate` 读它，
-  按屏幕尺寸降采样后以 `gravity=FILL` 铺满全屏。
-- 主题/资源里那套“代码写的启动图”已删除（不再有 `res/drawable/splash.xml` 和 `SplashTheme`）。
-- 原代码里那句 “Powered by AndroLua+” 的 TextView 已删除（`Welcome.java`）。
+- **系统那层**：主题 `SplashTheme`（`res/values/themes.xml`，parent `Theme.SplashScreen`）
+  - `windowSplashScreenBackground` = `@color/splash_background`（取启动图顶部区域的平均色）
+  - `windowSplashScreenAnimatedIcon` = `@drawable/splash_icon_transparent`（透明 → 不显示图标）
+  - `postSplashScreenTheme` = `SplashPostTheme`（背景先保持同色）
+  - `Welcome.onCreate` 里调 `SplashScreen.installSplashScreen(this)`
+- **我们的图**：`assets/res/splash_screen.png`；`Welcome.onCreate` 读它、降采样后按 **centerCrop**
+  铺满全屏并设为窗口背景（窗口第一帧就是它，紧接在系统那层之后，看不到接缝）。
+- 原代码里那句 “Powered by AndroLua+” 的 TextView 已删除。
 
+依赖：`androidx.core:core-splashscreen`（见 `gradle/libs.versions.toml`）。
+换图后若顶部主色变了，记得改 `res/values/colors.xml` 的 `splash_background`。
 > 老机制仍在：在 Lua 目录放一张 `setup.png` 会覆盖启动图（见 `Welcome.onCreate`）。
-> 注意：图片放在 assets 而不是 res，所以系统“启动窗口”阶段（Activity 第一帧之前）仍是主题默认背景，
-> 可能出现极短的一帧底色；要完全无缝，可把这张图同时设为主题的 `windowBackground`。
