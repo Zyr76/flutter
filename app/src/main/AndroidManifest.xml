@@ -203,6 +203,20 @@
             android:screenOrientation="portrait"
             android:theme="@style/app_theme"
             tools:targetApi="lollipop" />
+        <!--
+            插件宿主（代理 Activity）：宿主里唯一为「外部 dex 页面」注册的组件。
+            dex 里的 Fragment 无需在此注册，由 ProxyActivity 动态加载后装进内容容器。
+            taskAffinity 给一个独立值，配合调用方的 FLAG_ACTIVITY_NEW_TASK，
+            让插件页面在最近任务里作为独立卡片出现（类似小程序）。
+        -->
+        <activity
+            android:name="com.androlua.plugin.ProxyActivity"
+            android:exported="false"
+            android:label="插件页面"
+            android:taskAffinity="com.androlua.plugin"
+            android:excludeFromRecents="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
+            android:theme="@style/app_theme" />
         <activity
             android:name="com.androlua.Welcome"
             android:label="AndroLua+"

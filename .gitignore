@@ -27,3 +27,6 @@ flutter_bridge/.android/**/build/
 # Flutter 模块插件构建产物
 flutter_bridge/.android/.kotlin/
 flutter_bridge/.android/plugins_build_output/
+
+# ---- 插件 dex demo 构建产物 ----
+plugin-dex-demo/out/

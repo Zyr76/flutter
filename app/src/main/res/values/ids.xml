@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        插件宿主 ProxyActivity 的内容容器 id。
+        用固定资源 id 而不是 View.generateViewId()，是为了让 Fragment 在
+        屏幕旋转 / 进程重建时能被 FragmentManager 恢复到同一个容器。
+    -->
+    <item name="plugin_container" type="id" />
+</resources>
