@@ -17,7 +17,11 @@ import android.provider.Settings;
 import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import android.widget.TextView;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
+import android.view.Gravity;
 
 import com.luajava.LuaFunction;
 import com.luajava.LuaState;
@@ -57,20 +61,26 @@ public class Welcome extends Activity {
 
     private ArrayList<String> permissions;
 
+    /** 启动图资源路径（放在 assets 里）。 */
+    private static final String SPLASH_ASSET = "res/splash_screen.png";
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
-        // 启动页只显示一张全屏图片，不带任何文字：
-        //   默认图片 = res/drawable/splash.xml（引用 @drawable/welcome，可换成自己的图）；
-        //   由 SplashTheme 的 windowBackground 提供，因此系统“启动窗口”阶段就已经是这张图，无缝衔接。
-        //   若 Lua 目录下存在 setup.png，则用它覆盖（老机制保留）。
+        // 启动页：一张全屏图片、无任何文字，图片取自 assets/res/splash_screen.png。
+        // 若 Lua 目录下存在 setup.png，则用它覆盖（老机制保留）。
         app = (LuaApplication) getApplication();
         luaMdDir = app.luaMdDir;
         localDir = app.localDir;
         try {
-            if (new File(app.getLuaPath("setup.png")).exists())
-                getWindow().setBackgroundDrawable(new LuaBitmapDrawable(app, app.getLuaPath("setup.png"), getResources().getDrawable(R.drawable.splash)));
+            File setup = new File(app.getLuaPath("setup.png"));
+            Drawable splash = setup.exists()
+                    ? new LuaBitmapDrawable(app, setup.getAbsolutePath(), null)
+                    : loadAssetSplash();
+            if (splash != null) {
+                getWindow().setBackgroundDrawable(splash);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -115,6 +125,56 @@ public class Welcome extends Activity {
             new UpdateTask().execute();
         } else {
             startActivity();
+        }
+    }
+
+    /**
+     * 从 assets 读启动图（{@link #SPLASH_ASSET}），按屏幕尺寸降采样后铺满全屏。
+     * 读不到（资源缺失/Permission）时返回 null，不改窗口背景。
+     */
+    private Drawable loadAssetSplash() {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        InputStream probe = null;
+        try {
+            probe = getAssets().open(SPLASH_ASSET);
+            BitmapFactory.decodeStream(probe, null, bounds);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        } finally {
+            if (probe != null) {
+                try {
+                    probe.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null;
+        }
+        try {
+            int reqW = getResources().getDisplayMetrics().widthPixels;
+            int reqH = getResources().getDisplayMetrics().heightPixels;
+            int sample = 1;
+            while (bounds.outWidth / (sample * 2) >= reqW
+                    && bounds.outHeight / (sample * 2) >= reqH) {
+                sample *= 2;
+            }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = sample;
+            InputStream in = getAssets().open(SPLASH_ASSET);
+            Bitmap bitmap = BitmapFactory.decodeStream(in, null, opts);
+            in.close();
+            if (bitmap == null) {
+                return null;
+            }
+            BitmapDrawable drawable = new BitmapDrawable(getResources(), bitmap);
+            drawable.setGravity(Gravity.FILL); // 铺满全屏
+            return drawable;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
         }
     }
 

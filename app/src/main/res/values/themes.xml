@@ -13,13 +13,4 @@
   <style name="PluginTheme" parent="app_theme">
     <item name="android:windowDisablePreview">true</item>
   </style>
-
-  <!--
-    启动页主题（Welcome 用）：windowBackground 直接就是启动图。
-    系统在 Activity 绘制前的“启动窗口”阶段就会画这个背景，因此启动页是一张全屏图片、
-    无文字、也不会先闪白屏。图片见 res/drawable/splash.xml。
-  -->
-  <style name="SplashTheme" parent="app_theme">
-    <item name="android:windowBackground">@drawable/splash</item>
-  </style>
 </resources>

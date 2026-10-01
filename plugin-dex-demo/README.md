@@ -259,14 +259,13 @@ cd plugin-dex-demo && ./build_dex.sh --push     # 编译并推到 /sdcard/plugin
 
 ## 八、AndroLua 启动图（全屏图片、无文字）
 
-启动页是 `com.androlua.Welcome`，现已改成**一张全屏图片、无任何文字**：
+启动页是 `com.androlua.Welcome`，显示**一张全屏图片、无任何文字**：
 
-- 启动图资源：`app/src/main/res/drawable/splash.xml`（layer-list，默认引用 `@drawable/welcome`）。
-- 主题 `SplashTheme`（`res/values/themes.xml`）把它的 `android:windowBackground` 设为该图，
-  并应用到 Manifest 里的 `Welcome`。
+- 启动图文件：`app/src/main/assets/res/splash_screen.png`；`Welcome.onCreate` 读它，
+  按屏幕尺寸降采样后以 `gravity=FILL` 铺满全屏。
+- 主题/资源里那套“代码写的启动图”已删除（不再有 `res/drawable/splash.xml` 和 `SplashTheme`）。
 - 原代码里那句 “Powered by AndroLua+” 的 TextView 已删除（`Welcome.java`）。
 
-**换成自己的图片**：把图片放进 `app/src/main/res/drawable/`（如 `my_splash.png`），
-再把 `splash.xml` 里的 `android:src` 改成 `@drawable/my_splash`。缩放用 `android:gravity`：
-`fill` 拉伸铺满（默认）、`fill_horizontal|clip_vertical` 约等于 centerCrop。
 > 老机制仍在：在 Lua 目录放一张 `setup.png` 会覆盖启动图（见 `Welcome.onCreate`）。
+> 注意：图片放在 assets 而不是 res，所以系统“启动窗口”阶段（Activity 第一帧之前）仍是主题默认背景，
+> 可能出现极短的一帧底色；要完全无缝，可把这张图同时设为主题的 `windowBackground`。
