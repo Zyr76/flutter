@@ -485,9 +485,9 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
         synchronized (L) {
             try {
                 f.push();
-                pushRow(position);
-                L.pushInteger(position + 1);
-                L.pushJavaObject(v);
+                L.pushInteger(position + 1);   // 1) 位置（Lua 从 1 起）
+                pushRow(position);             // 2) 数据行
+                L.pushJavaObject(v);           // 3) item 视图
                 if (L.pcall(3, 0, 0) != 0) {
                     String err = L.toString(-1);
                     L.pop(1);

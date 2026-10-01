@@ -10,6 +10,10 @@
 --   Lottie           矢量动画
 --   LuaWebView       网页
 --   LuaEditor        代码编辑器
+--
+-- 注意（AndroLua 的 thread）：thread{} 会把函数 dump 到新的 LuaState 执行，
+-- 因此 ① 函数里捕获的 upvalue（外部局部变量）会丢失，需要的数据要用参数传入；
+--       ② 新状态没有主脚本的 import，需在 thread 内重新 require/import。
 -- ============================================================
 
 require "import"
@@ -38,12 +42,10 @@ local function pageList()
 
   -- 懒加载：不构造整表，按位置向 Lua 现取（适合超大 / 虚拟列表）
   adapter.setSource(
-    function() return 100000 end,                                   -- 总数
+    function() return 100000 end,
     function(pos) return { title = "第 " .. pos .. " 项", sub = "懒加载 · 点我看看" } end
   )
-  -- 分页示例（滚动到底部会回调一次；此处演示，可去掉）
-  -- adapter.setOnLoadMore(function() print("到底了，可在这里加载下一页") end)
-
+  -- 点击回调签名：function(pos, data, view)，pos 从 1 开始
   adapter.setOnItemClick(function(pos, data)
     activity.showToast("点击：" .. pos .. " · " .. tostring(data.title))
   end)
@@ -53,25 +55,22 @@ local function pageList()
 end
 
 -- ============================================================
--- 2) FlexboxLayout 流式布局（FlowLayout）
+-- 2) FlexboxLayout 流式布局（FlowLayout）—— 用 loadlayout 生成，自动处理 LayoutParams
 -- ============================================================
 local function pageFlow()
-  local scroll = ScrollView(activity)
-  local flow = FlexboxLayout(activity)
-  flow.setFlexWrap(FlexboxLayout.WRAP)         -- 自动换行
-  flow.setPadding(24, 24, 24, 24)
+  local t = {
+    FlexboxLayout, layout_width = "fill", layout_height = "wrap_content",
+    padding = "12dp", flexWrap = 1,        -- 1 = WRAP（自动换行）
+  }
   for i = 1, 30 do
-    local t = TextView(activity)
-    t.setText("标签 " .. i)
-    t.setTextColor(0xffffffff)
-    t.setBackgroundColor(0xff3f51b5)
-    t.setPadding(28, 14, 28, 14)
-    local lp = FlexboxLayout.LayoutParams(-2, -2)
-    lp.setMargins(12, 12, 0, 0)
-    t.setLayoutParams(lp)
-    flow.addView(t)
+    t[#t + 1] = {
+      TextView, text = "标签 " .. i,
+      textColor = "0xffffffff", backgroundColor = "0xff3f51b5",
+      padding = "10dp", layout_margin = "6dp",
+    }
   end
-  scroll.addView(flow, ViewGroup.LayoutParams(-1, -2))
+  local scroll = ScrollView(activity)
+  scroll.addView(loadlayout(t), ViewGroup.LayoutParams(-1, -2))
   return scroll
 end
 
@@ -88,30 +87,35 @@ local function pageImage()
 end
 
 -- ============================================================
--- 4) OkHttp 网络请求（在子线程执行，回主线程更新 UI）
+-- 4) OkHttp 网络请求
+--    thread 内是新 LuaState：需重新 import；view 用参数传入（避免 upvalue 丢失）
 -- ============================================================
 local function pageNet()
   local tv = TextView(activity)
   tv.setPadding(24, 24, 24, 24)
   tv.setTextIsSelectable(true)
   tv.setText("请求中…")
-  thread(function()
-    local ok, res = pcall(function()
+
+  thread(function(view)
+    require "import"
+    import "okhttp3.*"
+    local ok, body = pcall(function()
       local client = OkHttpClient()
       local req = Request.Builder().url("https://www.baidu.com").build()
       local resp = client.newCall(req).execute()
-      local body = resp.body().string()
+      local s = resp.body().string()
       resp.close()
-      return body
+      return s
     end)
     activity.runOnUiThread(function()
       if ok then
-        tv.setText(("OkHttp 返回 %d 字节：\n\n"):format(#res) .. res:sub(1, 800))
+        view.setText(("OkHttp 返回 %d 字节：\n\n"):format(#body) .. body:sub(1, 800))
       else
-        tv.setText("请求失败：\n" .. tostring(res))
+        view.setText("请求失败：\n" .. tostring(body))
       end
     end)
-  end)
+  end, tv)
+
   return tv
 end
 
@@ -123,15 +127,21 @@ local function pageLottie()
   wrap.setOrientation(LinearLayout.VERTICAL)
   wrap.setPadding(24, 24, 24, 24)
 
-  local lv = LottieAnimationView(activity)
-  lv.setRepeatCount(-1)                          -- 无限循环
-  local ok, err = pcall(function() lv.setAnimation("anim.json") end)
-  if ok then
+  local okCtor, lv = pcall(LottieAnimationView, activity)
+  if not okCtor then
+    local tv = TextView(activity)
+    tv.setText("LottieAnimationView 创建失败：\n" .. tostring(lv))
+    return tv
+  end
+
+  lv.setRepeatCount(-1)
+  local okAnim, err = pcall(function() lv.setAnimation("anim.json") end)
+  if okAnim then
     lv.playAnimation()
   end
 
   local hint = TextView(activity)
-  hint.setText(ok and "Lottie 正在播放 assets/anim.json"
+  hint.setText(okAnim and "Lottie 正在播放 assets/anim.json"
     or ("未找到 assets/anim.json，请放入一个 lottie json。\n" .. tostring(err)))
 
   wrap.addView(lv, LinearLayout.LayoutParams(-1, 0, 1))
