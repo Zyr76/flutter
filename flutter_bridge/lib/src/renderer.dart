@@ -691,11 +691,12 @@ class Renderer {
         final tabId = p['id']?.toString();
         final tabLen = p.i('length') ?? 1;
         final tabIndex = (p.i('index') ?? p.i('initialIndex') ?? 0).clamp(0, tabLen - 1);
-        // 带 id 时把 index 编进 key：Lua 侧 `tabs.dart.Index = n` 会重建控制器 → 运行期切页
-        result = DefaultTabController(
-          key: tabId != null ? ValueKey('tabs:$tabId:$tabIndex') : null,
+        result = BridgeTabs(
+          key: tabId != null ? ValueKey('tabs:$tabId') : null,
+          id: tabId,
           length: tabLen,
-          initialIndex: tabIndex,
+          index: tabIndex,
+          onChanged: (i) => _change(p, i),
           child: child0(),
         );
         break;
@@ -1950,10 +1951,16 @@ class Renderer {
 
   static dynamic _creationParams(Props p) {
     final params = p['params'];
-    if (params is Map) return params.cast<String, dynamic>();
+    // 原生控件对象由引擎序列化成内部引用，原样转发给平台视图工厂
+    final view = p['view'];
+    if (params is Map) {
+      if (view == null) return params.cast<String, dynamic>();
+      return <String, dynamic>{...params.cast<String, dynamic>(), 'view': view};
+    }
     return <String, dynamic>{
       'text': (p['text'] ?? '原生 AndroidView').toString(),
       'background': p['background']?.toString(),
+      if (view != null) 'view': view,
     };
   }
 
@@ -2807,6 +2814,7 @@ class FlutterAudio {
 ///    `scrollTo(offset)` `animatedScrollTo(offset,duration)` `scrollBy(delta)`
 ///    `scrollToEnd` `scrollToStart` `scrollState`
 ///  * 翻页（PageView）：`pageTo(index)` `nextPage` `prevPage` `pageState`
+///  * 标签页（DefaultTabController，需带 id）：`tabTo(index)` `nextTab` `prevTab` `tabState`
 ///  * 文本框（TextField/TextFormField）：`setText(text)` `clear` `focus` `unfocus` `textState`
 ///  * 媒体：VideoPlayer（play/pause/toggle/seek/seekPercent/volume/speed/loop/state）
 ///    与 AudioPlayer（多一个 stop）；`listenProgress(enabled, interval)` 开启/关闭**持续监听**：
@@ -2816,10 +2824,11 @@ class FlutterAudio {
 ///  * 抽屉：`openDrawer` `closeDrawer`
 ///
 /// 另外这些“只认初始值”的控件已改成**可运行期改**（改属性即生效）：
-///  * DefaultTabController：`tabs.dart.Index = n` 切页
+///  * DefaultTabController：`tabs.dart.Index = n` 切页（复用同一个 controller 做动画，指示器不再瞬移）
 ///  * ExpansionTile：`tile.dart.Expanded = true/false` 展开/收起
 class FlutterControl {
   static final Map<String, ScrollController> _scrolls = {};
+  static final Map<String, TabController> _tabs = {};
   static final Map<String, PageController> _pages = {};
   static final Map<String, TextEditingController> _texts = {};
   static final Map<String, FocusNode> _focusNodes = {};
@@ -2837,6 +2846,13 @@ class FlutterControl {
       _texts.putIfAbsent(id, () => TextEditingController(text: initial));
 
   static FocusNode focusNode(String id) => _focusNodes.putIfAbsent(id, () => FocusNode());
+
+  /// DefaultTabController 建好控制器后登记进来，供 tabTo/nextTab/prevTab/tabState 使用。
+  static void registerTab(String id, TabController controller) => _tabs[id] = controller;
+
+  static TabController? tabOf(String id) => _tabs[id];
+
+  static void unregisterTab(String id) => _tabs.remove(id);
 
   /// 节点被移除时可释放控制器；当前未自动调用（避免列表回收时误释放）。
   static void release(String id) {
@@ -2903,6 +2919,26 @@ class FlutterControl {
           return {'ok': true, 'page': pc.page};
         case 'pageState':
           return {'ok': true, 'page': pc.page};
+      }
+    }
+
+    // 3.5) 标签页
+    final tb = _tabs[id];
+    if (tb != null) {
+      const dur = Duration(milliseconds: 300);
+      int clampIndex(int i) => i < 0 ? 0 : (i >= tb.length ? tb.length - 1 : i);
+      switch (action) {
+        case 'tabTo':
+          tb.animateTo(clampIndex((args['index'] as num?)?.toInt() ?? 0), duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'index': tb.index};
+        case 'nextTab':
+          tb.animateTo(clampIndex(tb.index + 1), duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'index': tb.index};
+        case 'prevTab':
+          tb.animateTo(clampIndex(tb.index - 1), duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'index': tb.index};
+        case 'tabState':
+          return {'ok': true, 'index': tb.index, 'length': tb.length};
       }
     }
 
@@ -3336,6 +3372,74 @@ class _IdNodeState extends State<_IdNode> {
       builder: (context, spec, _) =>
           Renderer._buildNodeFor(spec, widget.path) ?? const SizedBox.shrink(),
     );
+  }
+}
+
+class BridgeTabs extends StatefulWidget {
+  const BridgeTabs({super.key, required this.id, required this.length, required this.index, this.onChanged, required this.child});
+  final String? id;
+  final int length;
+  final int index;
+  final ValueChanged<int>? onChanged;
+  final Widget child;
+  @override
+  State<BridgeTabs> createState() => _BridgeTabsState();
+}
+
+/// 包一层 DefaultTabController，但切页时复用同一个 controller 做 animateTo。
+/// 以前把 index 编进 key（重建控制器）会让指示器瞬移，没有过渡动画。
+class _BridgeTabsState extends State<BridgeTabs> {
+  BuildContext? _inner;
+  TabController? _controller;
+
+  @override
+  Widget build(BuildContext context) => DefaultTabController(
+        length: widget.length,
+        initialIndex: widget.index,
+        child: Builder(builder: (ctx) {
+          _bind(ctx);
+          return widget.child;
+        }),
+      );
+
+  void _bind(BuildContext ctx) {
+    _inner = ctx;
+    final c = DefaultTabController.maybeOf(ctx);
+    if (c == null || identical(c, _controller)) return;
+    _controller?.removeListener(_onSettled);
+    _controller = c;
+    c.addListener(_onSettled);
+    final id = widget.id;
+    if (id != null) FlutterControl.registerTab(id, c);
+  }
+
+  /// indexIsChanging 期间是动画中，落地后再通知，避免 Lua 收到一堆中间值。
+  void _onSettled() {
+    final c = _controller;
+    if (c == null || c.indexIsChanging) return;
+    widget.onChanged?.call(c.index);
+  }
+
+  @override
+  void didUpdateWidget(BridgeTabs old) {
+    super.didUpdateWidget(old);
+    if (widget.index == old.index) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _inner;
+      if (!mounted || ctx == null) return;
+      DefaultTabController.maybeOf(ctx)?.animateTo(widget.index);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_onSettled);
+    final id = widget.id;
+    // 只清理自己注册的那一个：重建时新状态可能已经注册好了
+    if (id != null && identical(FlutterControl.tabOf(id), _controller)) {
+      FlutterControl.unregisterTab(id);
+    }
+    super.dispose();
   }
 }
 
