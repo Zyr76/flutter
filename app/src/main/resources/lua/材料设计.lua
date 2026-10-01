@@ -39,4 +39,8 @@ import "androidx.appcompat.widget.*"
 import "androidx.cardview.widget.*"
 import "androidx.core.widget.*"
 
+-- ---- 第三方控件 ----
+import "com.google.android.flexbox.*"      -- FlexboxLayout / FlexboxLayoutManager（FlowLayout）
+import "com.airbnb.lottie.*"               -- LottieAnimationView
+
 return true

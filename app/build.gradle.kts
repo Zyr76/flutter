@@ -74,6 +74,16 @@ dependencies {
     implementation("androidx.coordinatorlayout:coordinatorlayout:1.2.0")
     implementation("androidx.fragment:fragment:1.8.5")
 
+    // ---- 第三方库（Lua 脚本可 import，或走便捷全局函数）----
+    // 图片加载
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+    // 网络请求
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 流式布局 FlexboxLayout（FlowLayout）
+    implementation("com.google.android.flexbox:flexbox:3.0.0")
+    // 矢量动画
+    implementation("com.airbnb.android:lottie:6.4.1")
+
     // AndroLua + Flutter 桥：Flutter 模块（flutter_bridge）编译出的 AAR。
     // 需先执行 build_flutter_aar.sh / `cd flutter_bridge && flutter build aar` 生成本地仓库。
     debugImplementation("com.androlua.flutter_bridge:flutter_debug:1.0")
