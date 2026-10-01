@@ -53,6 +53,10 @@ public final class FlutterLuaBridge {
 
     private static final String TAG = "FlutterLuaBridge";
 
+    /** 已提醒过“主线程不能同步 dartCall”的方法名（同一名字只提醒一次，避免刷屏）。 */
+    private static final Set<String> WARNED_MAIN_THREAD_CALLS =
+            Collections.synchronizedSet(new HashSet<String>());
+
     /**
      * 同一个 LuaContext 下可能同时存在多个 LuaState（主脚本 + thread/task/runnable 各自新建的），
      * 所以这里记录的是一个集合：事件要广播给它们。
@@ -184,9 +188,12 @@ public final class FlutterLuaBridge {
 
                 if (Looper.myLooper() == Looper.getMainLooper()) {
                     // 主线程不能同步等待 Dart 应答（会 ANR）。自动异步化，结果通过 dartCallResult 事件回传。
-                    warn(L, "dartCall(\"" + name + "\") 在主线程不能同步返回，已自动异步化；"
-                            + "结果将作为 dartCallResult 事件回传（可用 function onFlutterEvent(e) 接收），"
-                            + "或改用 dartCall(name, args, callback) 拿回调。");
+                    // 同一方法名只提醒一次（不然每次调用都刷屏）。
+                    if (WARNED_MAIN_THREAD_CALLS.add(name)) {
+                        warn(L, "dartCall(\"" + name + "\") 在主线程不能同步返回，已自动异步化；"
+                                + "结果将作为 dartCallResult 事件回传（可用 function onFlutterEvent(e) 接收），"
+                                + "或改用 dartCall(name, args, callback) 拿回调。");
+                    }
                     flutter.callAsync(name, args, new FlutterLua.ResultCallback() {
                         @Override
                         public void onResult(Object result, String error) {

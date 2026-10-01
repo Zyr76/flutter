@@ -309,6 +309,7 @@ public final class LuaJson {
         alias("fontWeight", "bold", "strong");
         alias("textAlign", "text_alignment");
         alias("backgroundColor", "bg");
+        alias("end", "End");  // end 是 Lua 保留字，脚本里只能写大写 End
     }
 
     private static void alias(String canonical, String... names) {
