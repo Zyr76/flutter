@@ -41,6 +41,6 @@ import "androidx.core.widget.*"
 
 -- ---- 第三方控件 ----
 import "com.google.android.flexbox.*"      -- FlexboxLayout / FlexboxLayoutManager（FlowLayout）
-import "com.airbnb.lottie.*"               -- LottieAnimationView
+import "io.github.rosemoe.sora.widget.*"   -- SoraEditor CodeEditor
 
 return true

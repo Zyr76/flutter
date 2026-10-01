@@ -81,8 +81,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // 流式布局 FlexboxLayout（FlowLayout）
     implementation("com.google.android.flexbox:flexbox:3.0.0")
-    // 矢量动画
-    implementation("com.airbnb.android:lottie:6.4.1")
+    // 代码编辑器 SoraEditor（CodeEditor）
+    implementation("io.github.Rosemoe.sora-editor:editor:0.23.6")
 
     // AndroLua + Flutter 桥：Flutter 模块（flutter_bridge）编译出的 AAR。
     // 需先执行 build_flutter_aar.sh / `cd flutter_bridge && flutter build aar` 生成本地仓库。

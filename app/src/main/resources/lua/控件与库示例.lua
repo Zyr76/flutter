@@ -7,9 +7,9 @@
 --   FlexboxLayout    流式布局（FlowLayout）
 --   Glide            图片加载（网络 / 本地）
 --   OkHttp           网络请求
---   Lottie           矢量动画
+--   SoraEditor       代码编辑器（io.github.rosemoe.sora.widget.CodeEditor）
 --   LuaWebView       网页
---   LuaEditor        代码编辑器
+--   LuaEditor        内置代码编辑器
 --
 -- 注意（AndroLua 的 thread）：thread{} 会把函数 dump 到新的 LuaState 执行，
 -- 因此 ① 函数里捕获的 upvalue（外部局部变量）会丢失，需要的数据要用参数传入；
@@ -120,33 +120,18 @@ local function pageNet()
 end
 
 -- ============================================================
--- 5) Lottie 矢量动画（需把一个 lottie json 放到 assets，如 anim.json）
+-- 5) SoraEditor 代码编辑器（io.github.rosemoe.sora.widget.CodeEditor）
 -- ============================================================
-local function pageLottie()
-  local wrap = LinearLayout(activity)
-  wrap.setOrientation(LinearLayout.VERTICAL)
-  wrap.setPadding(24, 24, 24, 24)
-
-  local okCtor, lv = pcall(LottieAnimationView, activity)
-  if not okCtor then
-    local tv = TextView(activity)
-    tv.setText("LottieAnimationView 创建失败：\n" .. tostring(lv))
-    return tv
-  end
-
-  lv.setRepeatCount(-1)
-  local okAnim, err = pcall(function() lv.setAnimation("anim.json") end)
-  if okAnim then
-    lv.playAnimation()
-  end
-
-  local hint = TextView(activity)
-  hint.setText(okAnim and "Lottie 正在播放 assets/anim.json"
-    or ("未找到 assets/anim.json，请放入一个 lottie json。\n" .. tostring(err)))
-
-  wrap.addView(lv, LinearLayout.LayoutParams(-1, 0, 1))
-  wrap.addView(hint, LinearLayout.LayoutParams(-1, -2))
-  return wrap
+local function pageSora()
+  local ed = CodeEditor(activity)
+  ed.setText([[
+-- SoraEditor 示例
+local function hello(name)
+    print("hello, " .. name)
+end
+hello("AndroLua")
+]])
+  return ed
 end
 
 -- ============================================================
@@ -181,7 +166,7 @@ local pages = {
   { "流式布局", pageFlow },
   { "图片", pageImage },
   { "网络", pageNet },
-  { "动画", pageLottie },
+  { "Sora编辑器", pageSora },
   { "网页", pageWeb },
   { "编辑器", pageEditor },
 }
