@@ -123,18 +123,16 @@ end
 -- 5) SoraEditor 代码编辑器（io.github.rosemoe.sora.widget.CodeEditor）
 -- ============================================================
 local function pageSora()
-  local ed = CodeEditor(activity)
-  -- 挂上内置的 Lua 语言：关键字/字符串/注释/数字/运算符高亮 + 补全
-  local ok, err = pcall(function() ed.setEditorLanguage(LuaLanguage()) end)
-  if not ok then print("[Sora] setEditorLanguage 失败: " .. tostring(err)) end
-  ed.setText([[
--- SoraEditor 示例
+  -- 用 sora.lua 封装：SoraEditor + TextMate 的 Lua 语法高亮
+  return require("sora")([[
+-- SoraEditor + TextMate Lua 高亮
 local function hello(name)
-    print("hello, " .. name)
+    print("hello, " .. name)   -- 注释
 end
 hello("AndroLua")
+local n = 123
+if n then return nil end
 ]])
-  return ed
 end
 
 -- ============================================================
