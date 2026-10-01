@@ -17,7 +17,6 @@ import android.provider.Settings;
 import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import android.view.Gravity;
 import android.widget.TextView;
 
 import com.luajava.LuaFunction;
@@ -62,17 +61,16 @@ public class Welcome extends Activity {
     public void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
-        TextView view = new TextView(this);
-        view.setText(new String(new char[]{'P', 'o', 'w', 'e', 'r', 'e', 'd', ' ', 'b', 'y', ' ', 'A', 'n', 'd', 'o', 'L', 'u', 'a', '+'}));
-        view.setTextColor(0xff888888);
-        view.setGravity(Gravity.TOP);
-        setContentView(view);
+        // 启动页只显示一张全屏图片，不带任何文字：
+        //   默认图片 = res/drawable/splash.xml（引用 @drawable/welcome，可换成自己的图）；
+        //   由 SplashTheme 的 windowBackground 提供，因此系统“启动窗口”阶段就已经是这张图，无缝衔接。
+        //   若 Lua 目录下存在 setup.png，则用它覆盖（老机制保留）。
         app = (LuaApplication) getApplication();
         luaMdDir = app.luaMdDir;
         localDir = app.localDir;
         try {
             if (new File(app.getLuaPath("setup.png")).exists())
-                getWindow().setBackgroundDrawable(new LuaBitmapDrawable(app, app.getLuaPath("setup.png"), getResources().getDrawable(R.drawable.welcome)));
+                getWindow().setBackgroundDrawable(new LuaBitmapDrawable(app, app.getLuaPath("setup.png"), getResources().getDrawable(R.drawable.splash)));
         } catch (Exception e) {
             e.printStackTrace();
         }

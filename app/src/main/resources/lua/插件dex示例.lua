@@ -31,6 +31,7 @@ activity.setContentView(loadlayout{
 openBtn.onClick = function(v)
   打开Dex页面(DEX_PATH, FRAGMENT, {
     title = "插件页面 · 来自 Lua",          -- 标题栏 + 最近任务卡片都用它
+    icon  = "/sdcard/plugin_icon.png",    -- 最近任务卡片图标（可选；文件不存在则忽略）
     msg   = "你好，我是 Lua 传过来的字符串",
     count = 42,
     ratio = 3.14,

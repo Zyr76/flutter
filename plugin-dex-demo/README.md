@@ -123,8 +123,9 @@ Intent extra 只支持基本类型。Lua 的数字统一按 `double` 传；插�
 打开Dex页面(dex路径, Fragment类名 [, 参数表])
 ```
 
-参数表里 `title/标题`、`orientation/方向`、`adjacent/分屏`、`newTask/新任务` 是控制项，
-其余键原样作为业务参数传给 Fragment。别名：`加载Dex页面` / `dexPage` / `openDexPage`。
+参数表里 `title/标题`、`icon/图标`（任务卡片图标，图片文件路径）、`orientation/方向`、`adjacent/分屏`、
+`newTask/新任务` 是控制项，其余键原样作为业务参数传给 Fragment。
+别名：`加载Dex页面` / `dexPage` / `openDexPage`。
 
 ---
 
@@ -241,7 +242,7 @@ cd plugin-dex-demo && ./build_dex.sh --push     # 编译并推到 /sdcard/plugin
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| 最近任务标题始终是「插件页面」，改 `title` 没用 | `setTitle()` 只改标题栏（本主题还是 NoActionBar，看不见）；最近任务标题来自 taskDescription，缺省回退到 Manifest 的 `android:label` | `ProxyActivity.applyTaskLabel()` 调 `setTaskDescription()`，把 `title` 同步给最近任务 |
+| 最近任务标题/图标始终是「插件页面」，改 `title` 没用 | `setTitle()` 只改标题栏（本主题还是 NoActionBar，看不见）；最近任务的标题/图标来自 taskDescription，缺省回退到 Manifest 的 `android:label` | `ProxyActivity.applyTaskDescription()` 调 `setTaskDescription()`，把 `title`、`icon` 同步给最近任务 |
 | 打开插件页会先闪一帧白屏 | ① 系统“启动预览窗口”用主题背景色先画了一帧；② 原代码先 `setContentView(空容器)` 再 `commit()`（异步，下一帧才生效） | ① 主题 `PluginTheme` 加 `windowDisablePreview=true` 关掉预览窗口；② 先建好 Fragment，再 `setContentView` + **`commitNow()`** 同步提交 |
 | 从插件页返回先回到一个空白页，再返回才到 AndroLua | 那是**宿主脚本页**（LuaActivity）：示例脚本原来只有启动代码、没有 UI，所以是空白的 | 示例脚本改成有内容的宿主页（带「打开插件页面」按钮）；若不想保留宿主页，启动后调 `activity.finish()` 即可 |
 
@@ -253,3 +254,19 @@ cd plugin-dex-demo && ./build_dex.sh --push     # 编译并推到 /sdcard/plugin
 - 目前只代理 Fragment（页面）。如需插件提供 Service/广播等，可仿照再加代理壳。
 - 插件间隔离较弱（共享宿主 classpath）；要做强隔离需引入独立 ClassLoader + 资源沙箱。
 - 宿主 `targetSdk=29`；上架或提到 34+ 时请按第四节处理 dex 只读要求。
+
+---
+
+## 八、AndroLua 启动图（全屏图片、无文字）
+
+启动页是 `com.androlua.Welcome`，现已改成**一张全屏图片、无任何文字**：
+
+- 启动图资源：`app/src/main/res/drawable/splash.xml`（layer-list，默认引用 `@drawable/welcome`）。
+- 主题 `SplashTheme`（`res/values/themes.xml`）把它的 `android:windowBackground` 设为该图，
+  并应用到 Manifest 里的 `Welcome`。
+- 原代码里那句 “Powered by AndroLua+” 的 TextView 已删除（`Welcome.java`）。
+
+**换成自己的图片**：把图片放进 `app/src/main/res/drawable/`（如 `my_splash.png`），
+再把 `splash.xml` 里的 `android:src` 改成 `@drawable/my_splash`。缩放用 `android:gravity`：
+`fill` 拉伸铺满（默认）、`fill_horizontal|clip_vertical` 约等于 centerCrop。
+> 老机制仍在：在 Lua 目录放一张 `setup.png` 会覆盖启动图（见 `Welcome.onCreate`）。

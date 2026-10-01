@@ -3,6 +3,8 @@ package com.androlua.plugin;
 import android.app.ActivityManager;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.ViewGroup;
@@ -63,10 +65,12 @@ public class ProxyActivity extends FragmentActivity {
     public static final String EXTRA_TITLE = "title";
     /** 参数（可选）：屏幕方向，0=跟随系统（默认）、1=竖屏、2=横屏。 */
     public static final String EXTRA_ORIENTATION = "orientation";
+    /** 参数（可选）：最近任务卡片上的图标，传图片文件路径（如 {@code /sdcard/pic.png}）。 */
+    public static final String EXTRA_ICON = "icon";
 
     /** 内部键：以上这些是「控制参数」，不会作为业务参数转交给 Fragment。 */
     private static final String[] CONTROL_KEYS = {
-            EXTRA_DEX_PATH, EXTRA_FRAGMENT_CLASS, EXTRA_TITLE, EXTRA_ORIENTATION
+            EXTRA_DEX_PATH, EXTRA_FRAGMENT_CLASS, EXTRA_TITLE, EXTRA_ORIENTATION, EXTRA_ICON
     };
 
     /**
@@ -87,11 +91,12 @@ public class ProxyActivity extends FragmentActivity {
         fragmentClassName = intent.getStringExtra(EXTRA_FRAGMENT_CLASS);
 
         String title = intent.getStringExtra(EXTRA_TITLE);
+        String iconPath = intent.getStringExtra(EXTRA_ICON);
         if (title != null && title.length() > 0) {
             setTitle(title);
-            // 只 setTitle 改不了“最近任务”里的标题——那个来自 taskDescription，必须显式设置。
-            applyTaskLabel(title);
         }
+        // 只 setTitle 改不了“最近任务”里的标题/图标——那来自 taskDescription，必须显式设置。
+        applyTaskDescription(title, iconPath);
         applyOrientation(intent.getIntExtra(EXTRA_ORIENTATION, 0));
 
         // 重建场景（旋转屏幕、被系统回收后恢复）：FragmentManager 会自动把已有 Fragment
@@ -136,15 +141,69 @@ public class ProxyActivity extends FragmentActivity {
     }
 
     /**
-     * 设置“最近任务”卡片上显示的标题。
+     * 设置“最近任务”卡片上的标题与图标。
      * {@link #setTitle} 只改 Activity 自己的标题栏，对最近任务无效；
-     * 最近任务标题来自 taskDescription（未设置时才回退到 Manifest 里的 android:label）。
+     * 最近任务的标题/图标来自 taskDescription（未设置时才回退到 Manifest 里的 android:label）。
+     *
+     * @param title    窗口标题；为空时用 Manifest 里该 Activity 的 label
+     * @param iconPath 图标图片路径；为空时不改图标
      */
-    private void applyTaskLabel(String label) {
+    private void applyTaskDescription(String title, String iconPath) {
+        boolean hasTitle = title != null && title.length() > 0;
+        boolean hasIcon = iconPath != null && iconPath.length() > 0;
+        if (!hasTitle && !hasIcon) {
+            return;
+        }
+        String label = hasTitle ? title : resolveAppLabel();
+        if (label == null) {
+            return;
+        }
         try {
-            setTaskDescription(new ActivityManager.TaskDescription(label));
+            Bitmap icon = decodeTaskIcon(iconPath);
+            ActivityManager.TaskDescription description = icon != null
+                    ? new ActivityManager.TaskDescription(label, icon)
+                    : new ActivityManager.TaskDescription(label);
+            setTaskDescription(description);
         } catch (Exception e) {
             Log.w(TAG, "setTaskDescription 失败", e);
+        }
+    }
+
+    /** Manifest 里给本 Activity 配的 label，作为任务标题的缺省值。 */
+    private String resolveAppLabel() {
+        try {
+            return getPackageManager().getActivityInfo(getComponentName(), 0)
+                    .loadLabel(getPackageManager()).toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 解码最近任务图标；先读尺寸再按目标大小降采样，避免把整张大图读进内存。 */
+    private Bitmap decodeTaskIcon(String path) {
+        if (path == null || path.length() == 0) {
+            return null;
+        }
+        if (!new File(path).isFile()) {
+            Log.w(TAG, "任务图标文件不存在: " + path);
+            return null;
+        }
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, bounds);
+            int target = (int) (96 * getResources().getDisplayMetrics().density);
+            int sample = 1;
+            while (bounds.outWidth / (sample * 2) >= target
+                    || bounds.outHeight / (sample * 2) >= target) {
+                sample *= 2;
+            }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = sample;
+            return BitmapFactory.decodeFile(path, opts);
+        } catch (Throwable t) {
+            Log.w(TAG, "解码任务图标失败: " + path, t);
+            return null;
         }
     }
 

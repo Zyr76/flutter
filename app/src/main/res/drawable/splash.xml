@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    启动图（全屏、无文字）。
+    作为 Welcome 的 windowBackground，系统“启动窗口”阶段就显示它，因此不会先闪白屏。
+
+    换成自己的图片：
+      把 android:src 改成你的 drawable（例如把图片放进 res/drawable/my_splash.png 后写 @drawable/my_splash）。
+
+    缩放说明（bitmap 的 android:gravity）：
+      fill                          = 拉伸铺满（默认，一定会占满全屏，但比例不符会变形）
+      fill_horizontal|clip_vertical = 等比放大到填满宽度、垂直居中裁切（纵向图片的 centerCrop 效果）
+      center                        = 居中不缩放（会留白）
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <bitmap
+            android:src="@drawable/welcome"
+            android:gravity="fill" />
+    </item>
+</layer-list>

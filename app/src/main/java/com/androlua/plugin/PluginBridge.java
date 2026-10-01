@@ -20,6 +20,7 @@ import com.luajava.LuaState;
  * <pre>
  * 打开Dex页面("/sdcard/plugin.dex", "com.example.plugin.DemoFragment", {
  *   title = "插件页面",        -- 窗口标题
+ *   icon = "/sdcard/pic.png",  -- 最近任务图标（可选，图片文件路径）
  *   adjacent = false,          -- true 时分屏邻位打开（仅 Android 7.0+）
  *   orientation = 0,           -- 0 跟随系统 / 1 竖屏 / 2 横屏
  *   newTask = true,            -- 是否新开 Task（默认 true）
@@ -44,6 +45,7 @@ public final class PluginBridge {
     private static final String[] KEY_ORIENTATION = {"orientation", "方向"};
     private static final String[] KEY_ADJACENT = {"adjacent", "分屏"};
     private static final String[] KEY_NEW_TASK = {"newTask", "新任务"};
+    private static final String[] KEY_ICON = {"icon", "图标"};
 
     private PluginBridge() {
     }
@@ -74,6 +76,10 @@ public final class PluginBridge {
                 int orientation = (int) optNumber(L, 4, 0, KEY_ORIENTATION);
                 if (orientation != 0) {
                     intent.putExtra(ProxyActivity.EXTRA_ORIENTATION, orientation);
+                }
+                String iconPath = optString(L, 4, KEY_ICON);
+                if (iconPath != null && iconPath.length() > 0) {
+                    intent.putExtra(ProxyActivity.EXTRA_ICON, iconPath);
                 }
                 if (optBoolean(L, 4, true, KEY_NEW_TASK)) {
                     intent.addFlags(FLAG_NEW_TASK);
@@ -158,7 +164,7 @@ public final class PluginBridge {
     }
 
     private static boolean isControlKey(String key) {
-        String[][] groups = {KEY_TITLE, KEY_ORIENTATION, KEY_ADJACENT, KEY_NEW_TASK};
+        String[][] groups = {KEY_TITLE, KEY_ORIENTATION, KEY_ADJACENT, KEY_NEW_TASK, KEY_ICON};
         for (String[] group : groups) {
             for (String k : group) {
                 if (k.equalsIgnoreCase(key)) {
