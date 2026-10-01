@@ -1187,8 +1187,73 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
         newActivity(1, path, null);
     }
 
-    public void newActivity(String path, Object[] arg) throws FileNotFoundException {
-        newActivity(1, path, arg);
+    /**
+     * 打开新 activity 运行 path 指向的 Lua 脚本/项目。
+     *
+     * <p>path 可为任意绝对路径、项目目录（含 main.lua），或相对当前脚本目录的路径。
+     *
+     * <p>第二个参数可以是：
+     * <ul>
+     *   <li>变长参数表（兼容旧用法）：{ a, b } —— 作为参数传给目标脚本；</li>
+     *   <li>选项表：{ arg = {a, b}, newTask = true, newDocument = true, req = 1 }。</li>
+     * </ul>
+     * 例：activity.newActivity("/sdcard/proj", { newTask = true, arg = {"x", 1} })
+     */
+    public void newActivity(String path, LuaObject options) throws FileNotFoundException, LuaException {
+        if (options == null || options.isNil()) {
+            newActivity(1, path, null, false, false);
+            return;
+        }
+        if (options.isBoolean()) {
+            // 兼容旧写法 newActivity(path, true)：true 即文档模式
+            newActivity(1, path, null, options.getBoolean(), false);
+            return;
+        }
+        if (options.isTable() && (hasField(options, "arg") || hasField(options, "newTask")
+                || hasField(options, "newDocument") || hasField(options, "req"))) {
+            newActivity(intField(options, "req", 1), path, arrayField(options, "arg"),
+                    boolField(options, "newDocument"), boolField(options, "newTask"));
+        } else if (options.isTable()) {
+            newActivity(1, path, options.asArray(), false, false);
+        } else {
+            newActivity(1, path, new Object[]{options.getObject()}, false, false);
+        }
+    }
+
+    private static boolean hasField(LuaObject o, String name) {
+        try {
+            LuaObject f = o.getField(name);
+            return f != null && !f.isNil();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean boolField(LuaObject o, String name) {
+        try {
+            LuaObject f = o.getField(name);
+            return f != null && !f.isNil() && f.getBoolean();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static int intField(LuaObject o, String name, int def) {
+        try {
+            LuaObject f = o.getField(name);
+            return (f != null && !f.isNil()) ? (int) f.getInteger() : def;
+        } catch (Exception e) {
+            return def;
+        }
+    }
+
+    private static Object[] arrayField(LuaObject o, String name) {
+        try {
+            LuaObject f = o.getField(name);
+            return (f != null && !f.isNil() && f.isTable()) ? f.asArray() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public void newActivity(int req, String path) throws FileNotFoundException {
@@ -1200,37 +1265,58 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
     }
 
     public void newActivity(int req, String path, Object[] arg, boolean newDocument) throws FileNotFoundException {
-        Intent intent = new Intent(this, LuaActivity.class);
+        newActivity(req, path, arg, newDocument, false);
+    }
+
+    public void newActivity(int req, String path, Object[] arg, boolean newDocument, boolean newTask) throws FileNotFoundException {
+        Intent intent;
         if (newDocument)
             intent = new Intent(this, LuaActivityX.class);
+        else
+            intent = new Intent(this, LuaActivity.class);
 
         intent.putExtra(NAME, path);
-        if (path.charAt(0) != '/')
-            path = luaDir + "/" + path;
-        File f = new File(path);
-        if (f.isDirectory() && new File(path + "/main.lua").exists())
-            path += "/main.lua";
-        else if ((f.isDirectory() || !f.exists()) && !path.endsWith(".lua"))
-            path += ".lua";
-        if (!new File(path).exists())
-            throw new FileNotFoundException(path);
+        intent.setData(Uri.parse("file://" + resolveLuaPath(path)));
 
-        if (newDocument) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
-                intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
-            }
+        if (newDocument && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
+            intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
         }
-
-        intent.setData(Uri.parse("file://" + path));
+        if (newTask)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
         if (arg != null)
             intent.putExtra(ARG, arg);
-        if (newDocument)
+
+        if (newDocument || newTask)
             startActivity(intent);
         else
             startActivityForResult(intent, req);
-        //overridePendingTransition(android.R.anim.slide_in_left, android.R.anim.slide_out_right);
+    }
+
+    /**
+     * 把 newActivity 的路径解析成实际要运行的 .lua 文件绝对路径。
+     * 支持：绝对路径、含 main.lua 的项目目录、相对当前脚本目录（回退应用目录）。
+     */
+    private String resolveLuaPath(String path) throws FileNotFoundException {
+        if (path == null || path.isEmpty())
+            throw new FileNotFoundException(String.valueOf(path));
+        String candidate;
+        if (path.charAt(0) == '/') {
+            candidate = path;
+        } else {
+            candidate = new File(luaDir, path).getAbsolutePath();
+            if (!new File(candidate).exists() && !new File(candidate + ".lua").exists())
+                candidate = new File(localDir, path).getAbsolutePath();
+        }
+        File f = new File(candidate);
+        if (f.isDirectory() && new File(f, "main.lua").exists())
+            candidate = new File(f, "main.lua").getAbsolutePath();
+        else if ((f.isDirectory() || !f.exists()) && !candidate.endsWith(".lua"))
+            candidate += ".lua";
+        if (!new File(candidate).exists())
+            throw new FileNotFoundException(path);
+        return candidate;
     }
 
     public void newActivity(String path, int in, int out, boolean newDocument) throws FileNotFoundException {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    系统启动画面用的图标。
+    直接放 @drawable/icon 会被系统按图标区域(288dp)整体放大，显得“被撑大”；
+    这里用 inset 给四周留白，使其在图标区域内以合适的尺寸居中显示（自适应、不变形）。
+    需要更小/更大改这里的 inset 百分比即可。
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/icon"
+    android:insetLeft="22%"
+    android:insetTop="22%"
+    android:insetRight="22%"
+    android:insetBottom="22%" />
