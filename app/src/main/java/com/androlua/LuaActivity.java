@@ -1269,8 +1269,11 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
     }
 
     public void newActivity(int req, String path, Object[] arg, boolean newDocument, boolean newTask) throws FileNotFoundException {
+        // newTask / newDocument 都用「文档任务」实现：只有这样才能在最近任务里生成独立卡片。
+        // （单靠 FLAG_ACTIVITY_NEW_TASK，同 taskAffinity 只会复用当前任务，不会出现新卡片。）
+        boolean newTaskOrDocument = newDocument || newTask;
         Intent intent;
-        if (newDocument)
+        if (newTaskOrDocument)
             intent = new Intent(this, LuaActivityX.class);
         else
             intent = new Intent(this, LuaActivity.class);
@@ -1278,17 +1281,15 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
         intent.putExtra(NAME, path);
         intent.setData(Uri.parse("file://" + resolveLuaPath(path)));
 
-        if (newDocument && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        if (newTaskOrDocument && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
             intent.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
         }
-        if (newTask)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
         if (arg != null)
             intent.putExtra(ARG, arg);
 
-        if (newDocument || newTask)
+        if (newTaskOrDocument)
             startActivity(intent);
         else
             startActivityForResult(intent, req);
@@ -1310,10 +1311,18 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
                 candidate = new File(localDir, path).getAbsolutePath();
         }
         File f = new File(candidate);
-        if (f.isDirectory() && new File(f, "main.lua").exists())
-            candidate = new File(f, "main.lua").getAbsolutePath();
-        else if ((f.isDirectory() || !f.exists()) && !candidate.endsWith(".lua"))
+        if (f.isDirectory()) {
+            File main = new File(f, "main.lua");
+            File init = new File(f, "init.lua");
+            if (main.exists())
+                candidate = main.getAbsolutePath();
+            else if (init.exists())
+                candidate = init.getAbsolutePath();
+            else if (!candidate.endsWith(".lua"))
+                candidate += ".lua";
+        } else if (!f.exists() && !candidate.endsWith(".lua")) {
             candidate += ".lua";
+        }
         if (!new File(candidate).exists())
             throw new FileNotFoundException(path);
         return candidate;
