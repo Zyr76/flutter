@@ -1628,6 +1628,7 @@ public class LuaActivity extends Activity implements LuaBroadcastReceiver.OnRece
 
         FlutterLuaBridge.register(L, this);
         PluginBridge.register(L, this);
+        LuaRecyclerAdapter.register(L, this);
 
     }
 
