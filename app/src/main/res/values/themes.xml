@@ -3,4 +3,14 @@
   </style>
 
   <style name="app_theme" parent="Base.AppTheme" />
+
+  <!--
+    插件宿主页面（ProxyActivity）专用主题。
+    windowDisablePreview=true：关掉系统的“启动预览窗口”——否则点开插件时会先显示
+    一帧主题背景色（默认白），看起来就是“先白屏一下才进入插件页”。
+    关掉后，界面准备就绪前保持在前一个画面，不再闪白。
+  -->
+  <style name="PluginTheme" parent="app_theme">
+    <item name="android:windowDisablePreview">true</item>
+  </style>
 </resources>

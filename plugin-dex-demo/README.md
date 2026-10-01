@@ -36,6 +36,7 @@ Androlua/
 ├── app/src/main/
 │   ├── AndroidManifest.xml                         ← ① 宿主 Manifest（新增 ProxyActivity 声明）
 │   ├── res/values/ids.xml                          ← 新增：Fragment 容器 id（恢复用）
+│   ├── res/values/themes.xml                       ← 新增：PluginTheme（windowDisablePreview 去白屏）
 │   ├── java/com/androlua/plugin/
 │   │   ├── ProxyActivity.java                      ← ② 宿主代理 Activity（DexClassLoader + Fragment 容器）
 │   │   └── PluginBridge.java                        ← 把「打开Dex页面」注册成 Lua 全局函数（脚本侧一行调用）
@@ -218,8 +219,8 @@ cd plugin-dex-demo && ./build_dex.sh --push     # 编译并推到 /sdcard/plugin
 
 | 检查点 | 预期 |
 | --- | --- |
-| 页面能打开 | 出现标题为「插件页面 · 来自 Lua」的新界面 |
-| 独立 Task | 进入最近任务，能看到与宿主主界面**分开**的一张卡片（小程序效果） |
+| 页面能打开 | 出现标题为「插件页面 · 来自 Lua」的新界面（无白屏闪烁） |
+| 独立 Task | 进入最近任务，能看到与宿主主界面**分开**的一张卡片，标题也是「插件页面 · 来自 Lua」 |
 | 字符串传参 | 页面显示「收到字符串 msg：你好，我是 Lua 传过来的字符串」 |
 | 数字传参 | 显示「收到数字 count：42」「收到小数 ratio：3.14」（不是 0！） |
 | 交互 | 点「点我 +1」计数递增；旋转屏幕后计数**不归零**（状态保持） |
@@ -235,6 +236,14 @@ cd plugin-dex-demo && ./build_dex.sh --push     # 编译并推到 /sdcard/plugin
 - **数字显示为 0** → 插件用了 `getInt()` 而值被存成 double；用 `Number` 读取（本示例已处理）。
 - **想改插件页面**：改 `DemoFragment.java` → 重新 `./build_dex.sh --push` → 重启页面即可，
   **宿主不用重新安装**。
+
+### 6. 三个界面现象（已在代码里处理）
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 最近任务标题始终是「插件页面」，改 `title` 没用 | `setTitle()` 只改标题栏（本主题还是 NoActionBar，看不见）；最近任务标题来自 taskDescription，缺省回退到 Manifest 的 `android:label` | `ProxyActivity.applyTaskLabel()` 调 `setTaskDescription()`，把 `title` 同步给最近任务 |
+| 打开插件页会先闪一帧白屏 | ① 系统“启动预览窗口”用主题背景色先画了一帧；② 原代码先 `setContentView(空容器)` 再 `commit()`（异步，下一帧才生效） | ① 主题 `PluginTheme` 加 `windowDisablePreview=true` 关掉预览窗口；② 先建好 Fragment，再 `setContentView` + **`commitNow()`** 同步提交 |
+| 从插件页返回先回到一个空白页，再返回才到 AndroLua | 那是**宿主脚本页**（LuaActivity）：示例脚本原来只有启动代码、没有 UI，所以是空白的 | 示例脚本改成有内容的宿主页（带「打开插件页面」按钮）；若不想保留宿主页，启动后调 `activity.finish()` 即可 |
 
 ---
 

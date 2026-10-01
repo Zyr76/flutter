@@ -216,7 +216,7 @@
             android:taskAffinity="com.androlua.plugin"
             android:excludeFromRecents="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
-            android:theme="@style/app_theme" />
+            android:theme="@style/PluginTheme" />
         <activity
             android:name="com.androlua.Welcome"
             android:label="AndroLua+"

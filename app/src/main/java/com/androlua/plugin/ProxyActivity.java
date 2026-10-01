@@ -1,5 +1,6 @@
 package com.androlua.plugin;
 
+import android.app.ActivityManager;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.os.Bundle;
@@ -85,23 +86,18 @@ public class ProxyActivity extends FragmentActivity {
         dexPath = intent.getStringExtra(EXTRA_DEX_PATH);
         fragmentClassName = intent.getStringExtra(EXTRA_FRAGMENT_CLASS);
 
-        CharSequence title = intent.getStringExtra(EXTRA_TITLE);
+        String title = intent.getStringExtra(EXTRA_TITLE);
         if (title != null && title.length() > 0) {
             setTitle(title);
+            // 只 setTitle 改不了“最近任务”里的标题——那个来自 taskDescription，必须显式设置。
+            applyTaskLabel(title);
         }
         applyOrientation(intent.getIntExtra(EXTRA_ORIENTATION, 0));
 
-        // 建内容容器。setContentView 必须在 super.onCreate 之后立即调用，
-        // 否则 FragmentManager 恢复 Fragment 时找不到容器。
-        FrameLayout container = new FrameLayout(this);
-        container.setId(CONTAINER_ID);
-        container.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        setContentView(container);
-
-        // 重建场景（旋转屏幕、被系统回收后恢复）：FragmentManager 已自动把 Fragment 恢复进容器，
-        // 此时不要重新加载 dex，否则会得到两个 Fragment。
+        // 重建场景（旋转屏幕、被系统回收后恢复）：FragmentManager 会自动把已有 Fragment
+        // 恢复到容器里，这里只要建好容器即可，不要重新加载 dex（否则会出现两个 Fragment）。
         if (savedInstanceState != null) {
+            setContentView(createContainer());
             return;
         }
 
@@ -112,16 +108,43 @@ public class ProxyActivity extends FragmentActivity {
             return;
         }
 
+        // 先把 Fragment 准备好（首次加载 dex 可能耗时），再设置视图内容、并【同步】提交事务。
+        // 这样窗口画出的第一帧就已经带着插件界面，不会“先闪一下白屏再出现内容”。
+        Fragment fragment;
         try {
-            Fragment fragment = createFragment(dexPath, fragmentClassName);
+            fragment = createFragment(dexPath, fragmentClassName);
             fragment.setArguments(buildFragmentArguments(intent));
-            getSupportFragmentManager()
-                    .beginTransaction()
-                    .replace(CONTAINER_ID, fragment, "plugin_fragment")
-                    .commit();
         } catch (Throwable t) {
             Log.e(TAG, "加载插件 Fragment 失败: " + fragmentClassName, t);
             showError(t);
+            return;
+        }
+
+        setContentView(createContainer());
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(CONTAINER_ID, fragment, "plugin_fragment")
+                .commitNow(); // 同步提交：commit() 是异步的，要到下一帧才生效，会多出一帧空白
+    }
+
+    private FrameLayout createContainer() {
+        FrameLayout container = new FrameLayout(this);
+        container.setId(CONTAINER_ID);
+        container.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return container;
+    }
+
+    /**
+     * 设置“最近任务”卡片上显示的标题。
+     * {@link #setTitle} 只改 Activity 自己的标题栏，对最近任务无效；
+     * 最近任务标题来自 taskDescription（未设置时才回退到 Manifest 里的 android:label）。
+     */
+    private void applyTaskLabel(String label) {
+        try {
+            setTaskDescription(new ActivityManager.TaskDescription(label));
+        } catch (Exception e) {
+            Log.w(TAG, "setTaskDescription 失败", e);
         }
     }
 
