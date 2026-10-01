@@ -18,12 +18,6 @@ import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.splashscreen.SplashScreen;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
-import android.view.Gravity;
-
 import com.luajava.LuaFunction;
 import com.luajava.LuaState;
 import com.luajava.LuaStateFactory;
@@ -62,31 +56,15 @@ public class Welcome extends Activity {
 
     private ArrayList<String> permissions;
 
-    /** 启动图资源路径（放在 assets 里）。 */
-    private static final String SPLASH_ASSET = "res/splash_screen.png";
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
-        // 接管系统 splash（Android 12+ 强制的那层）：SplashTheme 已把它设成「同色底 + 透明图标」。
+        // 系统启动画面：SplashTheme 提供「纯色底 + 居中 App 图标」，这里接管它在应用就绪前保持显示。
         SplashScreen.installSplashScreen(this);
-        // 启动页：一张全屏图片、无任何文字，图片取自 assets/res/splash_screen.png，按 centerCrop 铺满。
-        // 若 Lua 目录下存在 setup.png，则用它覆盖（老机制保留）。
         app = (LuaApplication) getApplication();
         luaMdDir = app.luaMdDir;
         localDir = app.localDir;
-        try {
-            File setup = new File(app.getLuaPath("setup.png"));
-            Drawable splash = setup.exists()
-                    ? new LuaBitmapDrawable(app, setup.getAbsolutePath(), null)
-                    : loadAssetSplash();
-            if (splash != null) {
-                getWindow().setBackgroundDrawable(splash);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
         if (checkInfo()) {
             if (Build.VERSION.SDK_INT >= 23) {
                 try {
@@ -128,82 +106,6 @@ public class Welcome extends Activity {
             new UpdateTask().execute();
         } else {
             startActivity();
-        }
-    }
-
-    /**
-     * 从 assets 读启动图（{@link #SPLASH_ASSET}），降采样后按 <b>centerCrop</b> 铺满全屏
-     * （等比放大到填满、再居中裁剪，不会拉伸变形）。读不到时返回 null，不改窗口背景。
-     */
-    private Drawable loadAssetSplash() {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        InputStream probe = null;
-        try {
-            probe = getAssets().open(SPLASH_ASSET);
-            BitmapFactory.decodeStream(probe, null, bounds);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        } finally {
-            closeQuietly(probe);
-        }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            return null;
-        }
-
-        int screenW = getResources().getDisplayMetrics().widthPixels;
-        int screenH = getResources().getDisplayMetrics().heightPixels;
-
-        // 降采样到「大约屏幕大小」：允许降到屏幕长边的一半，避免 3000x4000 的原图直接吃几十 MB 内存。
-        int longSide = Math.max(bounds.outWidth, bounds.outHeight);
-        int screenLong = Math.max(screenW, screenH);
-        int sample = 1;
-        while (longSide / (sample * 2) >= screenLong / 2) {
-            sample *= 2;
-        }
-
-        Bitmap src;
-        InputStream in = null;
-        try {
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = sample;
-            opts.inPreferredConfig = Bitmap.Config.RGB_565; // 启动图不需要 alpha，省一半内存
-            in = getAssets().open(SPLASH_ASSET);
-            src = BitmapFactory.decodeStream(in, null, opts);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        } finally {
-            closeQuietly(in);
-        }
-        if (src == null) {
-            return null;
-        }
-
-        BitmapDrawable drawable = new BitmapDrawable(getResources(), centerCrop(src, screenW, screenH));
-        drawable.setGravity(Gravity.FILL);
-        return drawable;
-    }
-
-    /** 等比放大到能铺满 targetW x targetH，再居中裁剪到该尺寸。 */
-    private static Bitmap centerCrop(Bitmap src, int targetW, int targetH) {
-        int w = src.getWidth();
-        int h = src.getHeight();
-        float scale = Math.max((float) targetW / w, (float) targetH / h);
-        int scaledW = Math.max(targetW, Math.round(w * scale));
-        int scaledH = Math.max(targetH, Math.round(h * scale));
-        Bitmap scaled = Bitmap.createScaledBitmap(src, scaledW, scaledH, true);
-        return Bitmap.createBitmap(scaled, (scaledW - targetW) / 2, (scaledH - targetH) / 2,
-                targetW, targetH);
-    }
-
-    private static void closeQuietly(InputStream in) {
-        if (in != null) {
-            try {
-                in.close();
-            } catch (IOException ignored) {
-            }
         }
     }
 
