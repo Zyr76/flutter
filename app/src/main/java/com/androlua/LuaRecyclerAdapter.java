@@ -99,6 +99,13 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     private LuaFunction mOnClick;
     private LuaFunction mOnLongClick;
 
+    /** 懒加载数据源：count 函数（返回总数） + item 函数（按位置取一行）。设了就不再用数据表。 */
+    private LuaFunction mCountFn;
+    private LuaFunction mItemFn;
+    /** 滚动到末尾时回调（分页/懒加载更多）。 */
+    private LuaFunction mOnLoadMore;
+    private boolean mLoadingMore;
+
     private boolean mNotifyOnChange = true;
 
     private final HashMap<String, Boolean> mLoaded = new HashMap<String, Boolean>();
@@ -156,6 +163,7 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
 
     @SuppressWarnings("unchecked")
     public void setData(LuaTable data) {
+        mLoadingMore = false;
         mData = data == null ? new LuaTable<Integer, LuaTable<String, Object>>(L)
                 : (LuaTable<Integer, LuaTable<String, Object>>) data;
         mBaseData = mData;
@@ -163,12 +171,14 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     }
 
     public void add(LuaTable item) throws LuaException {
+        mLoadingMore = false;
         mInsert.call(mBaseData, item);
         if (mNotifyOnChange)
             notifyDataSetChanged();
     }
 
     public void addAll(LuaTable items) throws LuaException {
+        mLoadingMore = false;
         int len = items.length();
         for (int i = 1; i <= len; i++)
             mInsert.call(mBaseData, items.get(i));
@@ -177,6 +187,7 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     }
 
     public void insert(int position, LuaTable item) throws LuaException {
+        mLoadingMore = false;
         mInsert.call(mBaseData, position + 1, item);
         if (mNotifyOnChange) {
             notifyItemInserted(position);
@@ -185,6 +196,7 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     }
 
     public void remove(int position) throws LuaException {
+        mLoadingMore = false;
         mRemove.call(mBaseData, position + 1);
         if (mNotifyOnChange) {
             notifyItemRemoved(position);
@@ -193,6 +205,7 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     }
 
     public void clear() {
+        mLoadingMore = false;
         mBaseData.clear();
         if (mNotifyOnChange)
             notifyDataSetChanged();
@@ -235,11 +248,62 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     }
 
     // ============================================================
+    // 懒加载
+    // ============================================================
+
+    /**
+     * 懒加载数据源：
+     * <pre>
+     * adapter.setSource(function() return 100000 end,          -- 总数（每次问）
+     *                   function(pos) return { title="第"..pos } end)  -- 按位置取一行（1 起）
+     * </pre>
+     * 设了之后不再依赖整表数据，适合超大/虚拟列表。
+     */
+    public void setSource(LuaFunction countFn, LuaFunction itemFn) {
+        mCountFn = countFn;
+        mItemFn = itemFn;
+        mLoadingMore = false;
+        notifyDataSetChanged();
+    }
+
+    /** 滚动到底部时回调一次，用于分页加载更多（数据就绪后调 finishLoadMore 或任意数据变更方法重置标志）。 */
+    public void setOnLoadMore(LuaFunction listener) {
+        mOnLoadMore = listener;
+    }
+
+    public void setLoadingMore(boolean loadingMore) {
+        mLoadingMore = loadingMore;
+    }
+
+    public void finishLoadMore() {
+        mLoadingMore = false;
+        notifyDataSetChanged();
+    }
+
+    // ============================================================
     // RecyclerView.Adapter
     // ============================================================
 
     @Override
     public int getItemCount() {
+        if (mCountFn != null) {
+            synchronized (L) {
+                try {
+                    mCountFn.push();
+                    if (L.pcall(0, 1, 0) != 0) {
+                        String err = L.toString(-1);
+                        L.pop(1);
+                        throw new LuaException(err);
+                    }
+                    int n = (int) L.toInteger(-1);
+                    L.pop(1);
+                    return n < 0 ? 0 : n;
+                } catch (Exception e) {
+                    mContext.sendError("RecyclerAdapter.count", new LuaException(e));
+                    return 0;
+                }
+            }
+        }
         return mData.length();
     }
 
@@ -322,37 +386,44 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
 
     @Override
     public void onBindViewHolder(ViewHolder vh, int position) {
-        LuaTable<String, Object> row = mData.get(position + 1);
-        if (row == null)
-            return;
-        if (mBinder != null) {
-            synchronized (L) {
-                try {
-                    mBinder.push();
-                    vh.holder.push();
-                    row.push();
-                    L.pushInteger(position + 1);
-                    if (L.pcall(3, 0, 0) != 0) {
-                        String err = L.toString(-1);
-                        L.pop(1);
-                        throw new LuaException(err);
+        LuaTable row = fetchRowTable(position);
+        if (row != null) {
+            if (mBinder != null) {
+                synchronized (L) {
+                    try {
+                        mBinder.push();
+                        vh.holder.push();
+                        row.push();
+                        L.pushInteger(position + 1);
+                        if (L.pcall(3, 0, 0) != 0) {
+                            String err = L.toString(-1);
+                            L.pop(1);
+                            throw new LuaException(err);
+                        }
+                    } catch (Exception e) {
+                        mContext.sendError("RecyclerAdapter.binder", new LuaException(e));
                     }
-                } catch (Exception e) {
-                    mContext.sendError("RecyclerAdapter.binder", new LuaException(e));
+                }
+            } else {
+                synchronized (L) {
+                    Set<Map.Entry> sets = row.entrySet();
+                    for (Map.Entry entry : sets) {
+                        try {
+                            LuaObject obj = vh.holder.getField(String.valueOf(entry.getKey()));
+                            if (obj != null && obj.isJavaObject())
+                                setHelper((View) obj.getObject(), entry.getValue());
+                        } catch (Exception e) {
+                            Log.i("lua", String.valueOf(e.getMessage()));
+                        }
+                    }
                 }
             }
-            return;
         }
-        synchronized (L) {
-            Set<Map.Entry<String, Object>> sets = row.entrySet();
-            for (Map.Entry<String, Object> entry : sets) {
-                try {
-                    LuaObject obj = vh.holder.getField(entry.getKey());
-                    if (obj != null && obj.isJavaObject())
-                        setHelper((View) obj.getObject(), entry.getValue());
-                } catch (Exception e) {
-                    Log.i("lua", String.valueOf(e.getMessage()));
-                }
+        if (mOnLoadMore != null && !mLoadingMore) {
+            int count = getItemCount();
+            if (count > 0 && position >= count - 1) {
+                mLoadingMore = true;
+                triggerLoadMore();
             }
         }
     }
@@ -362,11 +433,50 @@ public class LuaRecyclerAdapter extends RecyclerView.Adapter<LuaRecyclerAdapter.
     // ============================================================
 
     private void pushRow(int position) {
-        LuaTable<String, Object> row = mData.get(position + 1);
+        LuaTable row = fetchRowTable(position);
         if (row != null)
             row.push();
         else
             L.pushNil();
+    }
+
+    /** 取某一行的 Lua 表：懒加载模式走 itemFn，否则取数据表。 */
+    private LuaTable fetchRowTable(int position) {
+        if (mItemFn != null) {
+            synchronized (L) {
+                try {
+                    mItemFn.push();
+                    L.pushInteger(position + 1);
+                    if (L.pcall(1, 1, 0) != 0) {
+                        String err = L.toString(-1);
+                        L.pop(1);
+                        throw new LuaException(err);
+                    }
+                    LuaTable<?, ?> t = L.isNoneOrNil(-1) ? null : L.getLuaObject(-1).getTable();
+                    L.pop(1);
+                    return t;
+                } catch (Exception e) {
+                    mContext.sendError("RecyclerAdapter.item", new LuaException(e));
+                    return null;
+                }
+            }
+        }
+        return mData.get(position + 1);
+    }
+
+    private void triggerLoadMore() {
+        synchronized (L) {
+            try {
+                mOnLoadMore.push();
+                if (L.pcall(0, 0, 0) != 0) {
+                    String err = L.toString(-1);
+                    L.pop(1);
+                    throw new LuaException(err);
+                }
+            } catch (Exception e) {
+                mContext.sendError("RecyclerAdapter.onLoadMore", new LuaException(e));
+            }
+        }
     }
 
     private void callItem(LuaFunction f, int position, View v) {
