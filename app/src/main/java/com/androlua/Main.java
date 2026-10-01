@@ -8,8 +8,6 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
 
-import androidx.core.splashscreen.SplashScreen;
-
 import java.util.ArrayList;
 
 
@@ -18,19 +16,22 @@ public class Main extends LuaActivity
 
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
-		// 系统启动画面（App 图标）：在 setTheme / 加载 Lua 之前接管。
-		SplashScreen.installSplashScreen(this);
-		// 引导：首次安装或版本更新时，把 APK 内的 Lua 资源解到私有目录（main.lua 等），
-		// 必须在 super.onCreate() 加载脚本之前完成。
+		// 直接启动（如打开 .lua/.alp 文件）时兜底解包；正常启动时引导已由 SplashActivity 完成。
 		LuaApplication app = (LuaApplication) getApplication();
-		boolean versionChanged = app.bootstrapIfNeeded();
+		boolean bootstrappedNow = app.bootstrapIfNeeded();
 		super.onCreate(savedInstanceState);
 		// 权限申请直接弹在 Lua 界面上。
 		requestRuntimePermissions();
 		if(savedInstanceState==null && getIntent().getData()!=null)
 			runFunc("onNewIntent", getIntent());
-		if(versionChanged && (savedInstanceState==null)){
-			onVersionChanged(app.getVersionName(), app.getOldVersionName());
+		if(savedInstanceState==null && (bootstrappedNow || getIntent().getBooleanExtra("isVersionChanged", false))){
+			String newVersion = getIntent().getStringExtra("newVersionName");
+			String oldVersion = getIntent().getStringExtra("oldVersionName");
+			if (newVersion == null)
+				newVersion = app.getVersionName();
+			if (oldVersion == null)
+				oldVersion = app.getOldVersionName();
+			onVersionChanged(newVersion, oldVersion);
 		}
 	}
 
