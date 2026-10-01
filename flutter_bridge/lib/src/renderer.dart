@@ -2952,11 +2952,15 @@ class _BridgeVideoState extends State<BridgeVideo> {
   /// 当前播放状态（位置/时长/是否在播/缓冲等），供 Lua 查询。
   Map<String, dynamic> stateMap() {
     final v = _controller?.value;
+    // 注意：该版本 video_player 的 buffered 是 List<DurationRange>（不是 Duration）
+    final bufferedMs = (v == null || v.buffered.isEmpty)
+        ? 0
+        : v.buffered.last.end.inMilliseconds;
     return {
       'position': v?.position.inMilliseconds ?? 0,
       'duration': v?.duration.inMilliseconds ?? 0,
       'isPlaying': v?.isPlaying ?? false,
-      'buffered': v?.buffered.inMilliseconds ?? 0,
+      'buffered': bufferedMs,
       'aspectRatio': v?.aspectRatio ?? 1.0,
     };
   }
