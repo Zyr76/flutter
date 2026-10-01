@@ -266,7 +266,13 @@ public class LuaLanguage extends EmptyLanguage {
 
         private static void add(ArrayList<ArrayList<int[]>> lines, int line, int col, int color) {
             while (lines.size() <= line) lines.add(new ArrayList<int[]>());
-            lines.get(line).add(new int[]{col, color});
+            ArrayList<int[]> list = lines.get(line);
+            // 保证同一行内列严格递增：与上一个 span 同列时直接覆盖（避免 Builder 拒绝重复列）
+            if (!list.isEmpty() && list.get(list.size() - 1)[0] == col) {
+                list.get(list.size() - 1)[1] = color;
+            } else {
+                list.add(new int[]{col, color});
+            }
         }
 
         private static void markMultiline(ArrayList<ArrayList<int[]>> lines, int sLine, int sCol, int eLine, int eCol, int color) {
