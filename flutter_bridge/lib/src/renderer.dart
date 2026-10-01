@@ -274,6 +274,7 @@ class Renderer {
         break;
       case 'singlechildscrollview':
         result = SingleChildScrollView(
+          controller: p['id'] != null ? FlutterControl.scroll(p['id'].toString()) : null,
           scrollDirection: p.axis('scrollDirection'),
           physics: Props.toPhysics(p['physics']),
           padding: p.inset('padding'),
@@ -472,6 +473,7 @@ class Renderer {
         final gUseBuilder = gTemplate != null && gCount != null && gCount > 0;
         final gNeedsSubst = gUseBuilder && _hasTemplateVar(gTemplate);
         result = GridView.builder(
+          controller: p['id'] != null ? FlutterControl.scroll(p['id'].toString()) : null,
           padding: p.inset('padding'),
           scrollDirection: p.axis('scrollDirection'),
           reverse: p.b('reverse'),
@@ -707,6 +709,7 @@ class Renderer {
         break;
       case 'videoplayer':
         result = BridgeVideo(
+          id: p['id']?.toString(),
           url: (p['url'] ?? p['src'] ?? '').toString(),
           autoPlay: p.b('autoPlay'),
           loop: p.b('loop'),
@@ -1201,6 +1204,7 @@ class Renderer {
         if (rTemplate != null && rCount != null && rCount > 0) {
           final rNeedsSubst = _hasTemplateVar(rTemplate);
           result = ReorderableListView.builder(
+            scrollController: p['id'] != null ? FlutterControl.scroll(p['id'].toString()) : null,
             padding: p.inset('padding'),
             physics: Props.toPhysics(p['physics']),
             shrinkWrap: p.b('shrinkWrap'),
@@ -1253,6 +1257,7 @@ class Renderer {
         break;
       case 'customscrollview':
         result = CustomScrollView(
+          controller: p['id'] != null ? FlutterControl.scroll(p['id'].toString()) : null,
           scrollDirection: p.axis('scrollDirection'),
           reverse: p.b('reverse'),
           physics: Props.toPhysics(p['physics']),
@@ -1528,6 +1533,7 @@ class Renderer {
     final reverse = p.b('reverse');
     final itemExtent = p.n('itemExtent');
     final cacheExtent = p.n('cacheExtent');
+    final ctrl = p['id'] != null ? FlutterControl.scroll(p['id'].toString()) : null;
     final keyboardDismiss = p.s('keyboardDismissBehavior')?.toLowerCase() == 'ondrag'
         ? ScrollViewKeyboardDismissBehavior.onDrag
         : ScrollViewKeyboardDismissBehavior.manual;
@@ -1538,6 +1544,7 @@ class Renderer {
       final needsSubst = _hasTemplateVar(template);
       // 模板式懒加载：按需构建；模板含 $index/$i 时才逐项替换（否则直接用原引用）。
       return ListView.builder(
+        controller: ctrl,
         padding: padding,
         physics: physics,
         shrinkWrap: shrinkWrap,
@@ -1554,6 +1561,7 @@ class Renderer {
       );
     }
     return ListView.builder(
+      controller: ctrl,
       padding: padding,
       physics: physics,
       shrinkWrap: shrinkWrap,
@@ -2539,7 +2547,11 @@ class BridgeTextField extends StatefulWidget {
 }
 
 class _BridgeTextFieldState extends State<BridgeTextField> {
-  late final TextEditingController _controller = TextEditingController(text: widget.p.s('text') ?? '');
+  late final String? _id = widget.p['id']?.toString();
+  late final TextEditingController _controller = _id != null
+      ? FlutterControl.text(_id!, initial: widget.p.s('text') ?? '')
+      : TextEditingController(text: widget.p.s('text') ?? '');
+
   @override
   void didUpdateWidget(BridgeTextField old) {
     super.didUpdateWidget(old);
@@ -2551,7 +2563,7 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
     }
   }
   @override
-  void dispose() { _controller.dispose(); super.dispose(); }
+  void dispose() { if (_id == null) _controller.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -2559,6 +2571,7 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
     final obscure = p.b('obscure') || p.b('obscureText') || p.b('password');
     return TextField(
       controller: _controller,
+      focusNode: _id != null ? FlutterControl.focusNode(_id!) : null,
       decoration: InputDecoration(
         hintText: p.s('hint') ?? p.s('hintText'),
         labelText: p.s('label') ?? p.s('labelText'),
@@ -2703,9 +2716,181 @@ class _BridgeDropdownState extends State<BridgeDropdown> {
   }
 }
 
-/// 视频播放器（网络/本地 URL）。
+/// Flutter 视频播放器控制注册表：spec 的 `id` -> 内部状态。
+/// Lua 通过 `dartCall('flutterVideo', { id=, action=, ... })` 控制，
+/// 事件以 `flutterVideoEvent` 回传（Lua 用 onFlutterEvent 接收）。
+class FlutterVideo {
+  static final Map<String, _BridgeVideoState> _states = {};
+
+  static void attach(String id, _BridgeVideoState s) => _states[id] = s;
+
+  static void detach(String id, _BridgeVideoState s) {
+    if (identical(_states[id], s)) _states.remove(id);
+  }
+
+  /// id 不是视频时返回 null（供 FlutterControl 统一分发）。
+  static Future<Map<String, dynamic>?> tryCall(Map<String, dynamic> a) async {
+    final s = _states[(a['id'] ?? '').toString()];
+    if (s == null) return null;
+    final action = (a['action'] ?? '').toString();
+    if (action.isEmpty) return {'error': 'need action'};
+    return s.control(action, a);
+  }
+
+  /// 供逻辑层 dartCall('flutterVideo', ...) 直接调用。
+  static Future<Map<String, dynamic>> call(Map<String, dynamic>? a) async {
+    final args = a ?? const <String, dynamic>{};
+    final id = (args['id'] ?? '').toString();
+    if (id.isEmpty) return {'error': 'need id'};
+    final r = await tryCall(args);
+    return r ?? {'error': 'no such video: $id'};
+  }
+
+  static void emitEvent(String? id, String type, Map<String, dynamic> data) {
+    FlutterBridge.instance.emit('flutterVideoEvent', {'id': id, 'type': type, ...data});
+  }
+
+  static void emitState(String? id, _BridgeVideoState s) => emitEvent(id, 'ready', s.stateMap());
+}
+
+/// Flutter 控件的统一控制中心（命令式）。
+///
+/// 分工：
+///  * **属性**改动：Lua 用 `id.dart.属性 = 值`（原生 patchNode → Dart 定点重建），全控件通用；
+///  * **命令**（滚动/翻页/文本框/媒体/抽屉）：改属性做不到，走这里，
+///    Lua 调 `dartCall('flutterControl', { id=, action=, ... })`。
+///
+/// 动作：
+///  * 滚动（ListView/GridView/SingleChildScrollView/CustomScrollView）：
+///    `scrollTo(offset)` `animatedScrollTo(offset,duration)` `scrollBy(delta)`
+///    `scrollToEnd` `scrollToStart` `scrollState`
+///  * 翻页（PageView）：`pageTo(index)` `nextPage` `prevPage` `pageState`
+///  * 文本框（TextField/TextFormField）：`setText(text)` `clear` `focus` `unfocus` `textState`
+///  * 媒体（VideoPlayer）：`play` `pause` `toggle` `seek(pos)` `seekPercent(percent)`
+///    `volume(v)` `speed(x)` `loop(bool)` `state`
+///  * 抽屉：`openDrawer` `closeDrawer`
+class FlutterControl {
+  static final Map<String, ScrollController> _scrolls = {};
+  static final Map<String, PageController> _pages = {};
+  static final Map<String, TextEditingController> _texts = {};
+  static final Map<String, FocusNode> _focusNodes = {};
+
+  static ScrollController scroll(String id) => _scrolls.putIfAbsent(id, () => ScrollController());
+
+  static PageController page(String id, {int initial = 0}) =>
+      _pages.putIfAbsent(id, () => PageController(initialPage: initial));
+
+  static TextEditingController text(String id, {String initial = ''}) =>
+      _texts.putIfAbsent(id, () => TextEditingController(text: initial));
+
+  static FocusNode focusNode(String id) => _focusNodes.putIfAbsent(id, () => FocusNode());
+
+  /// 节点被移除时可释放控制器；当前未自动调用（避免列表回收时误释放）。
+  static void release(String id) {
+    _scrolls.remove(id)?.dispose();
+    _pages.remove(id)?.dispose();
+    _texts.remove(id)?.dispose();
+    _focusNodes.remove(id)?.dispose();
+  }
+
+  static Future<Map<String, dynamic>> call(Map<String, dynamic>? a) async {
+    final args = a ?? const <String, dynamic>{};
+    final id = (args['id'] ?? '').toString();
+    final action = (args['action'] ?? '').toString();
+    if (id.isEmpty || action.isEmpty) return {'error': 'need id and action'};
+
+    // 1) 视频 / 媒体
+    final media = await FlutterVideo.tryCall(args);
+    if (media != null) return media;
+
+    // 2) 滚动
+    final sc = _scrolls[id];
+    if (sc != null && sc.hasClients) {
+      final pos = sc.position;
+      double clamp(double v) => v.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      const dur = Duration(milliseconds: 300);
+      switch (action) {
+        case 'scrollTo':
+          sc.jumpTo(clamp((args['offset'] as num?)?.toDouble() ?? 0));
+          return {'ok': true, 'offset': sc.offset};
+        case 'animatedScrollTo':
+          await sc.animateTo(clamp((args['offset'] as num?)?.toDouble() ?? 0),
+              duration: Duration(milliseconds: (args['duration'] as num?)?.toInt() ?? 300),
+              curve: Curves.easeOut);
+          return {'ok': true, 'offset': sc.offset};
+        case 'scrollBy':
+          sc.jumpTo(clamp(sc.offset + ((args['delta'] as num?)?.toDouble() ?? 0)));
+          return {'ok': true, 'offset': sc.offset};
+        case 'scrollToEnd':
+          await sc.animateTo(pos.maxScrollExtent, duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'offset': sc.offset};
+        case 'scrollToStart':
+          await sc.animateTo(pos.minScrollExtent, duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'offset': sc.offset};
+        case 'scrollState':
+          return {'ok': true, 'offset': sc.offset, 'min': pos.minScrollExtent, 'max': pos.maxScrollExtent};
+      }
+    }
+
+    // 3) 翻页
+    final pc = _pages[id];
+    if (pc != null && pc.hasClients) {
+      const dur = Duration(milliseconds: 300);
+      switch (action) {
+        case 'pageTo':
+          await pc.animateToPage((args['index'] as num?)?.toInt() ?? 0, duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'page': pc.page};
+        case 'nextPage':
+          await pc.nextPage(duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'page': pc.page};
+        case 'prevPage':
+          await pc.previousPage(duration: dur, curve: Curves.easeOut);
+          return {'ok': true, 'page': pc.page};
+        case 'pageState':
+          return {'ok': true, 'page': pc.page};
+      }
+    }
+
+    // 4) 文本框
+    final tc = _texts[id];
+    if (tc != null) {
+      switch (action) {
+        case 'setText':
+          tc.text = (args['text'] ?? '').toString();
+          tc.selection = TextSelection.collapsed(offset: tc.text.length);
+          return {'ok': true, 'text': tc.text};
+        case 'clear':
+          tc.clear();
+          return {'ok': true};
+        case 'focus':
+          focusNode(id).requestFocus();
+          return {'ok': true};
+        case 'unfocus':
+          focusNode(id).unfocus();
+          return {'ok': true};
+        case 'textState':
+          return {'ok': true, 'text': tc.text, 'length': tc.text.length};
+      }
+    }
+
+    // 5) 抽屉
+    if (action == 'openDrawer') {
+      Renderer.scaffoldKey.currentState?.openDrawer();
+      return {'ok': true};
+    }
+    if (action == 'closeDrawer') {
+      Renderer.scaffoldKey.currentState?.closeDrawer();
+      return {'ok': true};
+    }
+
+    return {'error': 'no controllable widget for id=$id / action=$action'};
+  }
+}
+
+/// 视频播放器（网络/本地文件/asset）。
 class BridgeVideo extends StatefulWidget {
-  const BridgeVideo({super.key, required this.url, this.autoPlay = false, this.loop = false, this.showControls = true});
+  const BridgeVideo({super.key, required this.url, this.id, this.autoPlay = false, this.loop = false, this.showControls = true});
+  final String? id;
   final String url;
   final bool autoPlay;
   final bool loop;
@@ -2717,28 +2902,112 @@ class BridgeVideo extends StatefulWidget {
 class _BridgeVideoState extends State<BridgeVideo> {
   VideoPlayerController? _controller;
   String? _error;
+  bool? _lastPlaying;
+  bool _completedSent = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.id != null) FlutterVideo.attach(widget.id!, this);
     _init();
   }
 
   Future<void> _init() async {
     try {
-      final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      final u = widget.url;
+      final c = u.startsWith('http')
+          ? VideoPlayerController.networkUrl(Uri.parse(u))
+          : u.startsWith('/')
+              ? VideoPlayerController.file(File(u))
+              : VideoPlayerController.asset(u);
       await c.initialize();
       await c.setLooping(widget.loop);
+      c.addListener(_onControllerChanged);
       if (widget.autoPlay) await c.play();
       if (!mounted) { await c.dispose(); return; }
       setState(() => _controller = c);
+      FlutterVideo.emitState(widget.id, this);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
+      FlutterVideo.emitEvent(widget.id, 'error', {'error': e.toString()});
     }
+  }
+
+  void _onControllerChanged() {
+    final c = _controller;
+    if (c == null) return;
+    final playing = c.value.isPlaying;
+    if (playing != _lastPlaying) {
+      _lastPlaying = playing;
+      FlutterVideo.emitEvent(widget.id, 'state', stateMap());
+    }
+    final v = c.value;
+    if (!_completedSent && v.duration > Duration.zero && v.position >= v.duration && !playing) {
+      _completedSent = true;
+      FlutterVideo.emitEvent(widget.id, 'completed', stateMap());
+    }
+    if (v.isPlaying) _completedSent = false;
+  }
+
+  /// 当前播放状态（位置/时长/是否在播/缓冲等），供 Lua 查询。
+  Map<String, dynamic> stateMap() {
+    final v = _controller?.value;
+    return {
+      'position': v?.position.inMilliseconds ?? 0,
+      'duration': v?.duration.inMilliseconds ?? 0,
+      'isPlaying': v?.isPlaying ?? false,
+      'buffered': v?.buffered.inMilliseconds ?? 0,
+      'aspectRatio': v?.aspectRatio ?? 1.0,
+    };
+  }
+
+  /// 执行一条控制命令，返回最新状态。
+  Future<Map<String, dynamic>> control(String action, Map<String, dynamic> a) async {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return {'error': 'not ready'};
+    switch (action) {
+      case 'play':
+        await c.play();
+        break;
+      case 'pause':
+        await c.pause();
+        break;
+      case 'toggle':
+        if (c.value.isPlaying) {
+          await c.pause();
+        } else {
+          await c.play();
+        }
+        break;
+      case 'seek':
+        await c.seekTo(Duration(milliseconds: (a['pos'] as num?)?.toInt() ?? 0));
+        break;
+      case 'seekPercent':
+        final dur = c.value.duration.inMilliseconds;
+        final pct = (a['percent'] as num?)?.toDouble() ?? 0;
+        await c.seekTo(Duration(milliseconds: (dur * pct / 100).round()));
+        break;
+      case 'volume':
+        await c.setVolume(((a['volume'] as num?) ?? 1).toDouble().clamp(0.0, 1.0));
+        break;
+      case 'speed':
+        await c.setPlaybackSpeed(((a['speed'] as num?) ?? 1).toDouble());
+        break;
+      case 'loop':
+        await c.setLooping(a['loop'] == true);
+        break;
+      case 'state':
+        break;
+      default:
+        return {'error': 'unknown action: $action'};
+    }
+    return {'ok': true, ...stateMap()};
   }
 
   @override
   void dispose() {
+    if (widget.id != null) FlutterVideo.detach(widget.id!, this);
+    _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
     super.dispose();
   }
@@ -2975,12 +3244,14 @@ class BridgePageView extends StatefulWidget {
 }
 
 class _BridgePageViewState extends State<BridgePageView> {
-  late final PageController _controller =
-      PageController(initialPage: widget.p.i('initialPage') ?? widget.p.i('page') ?? 0);
+  late final String? _id = widget.p['id']?.toString();
+  late final PageController _controller = _id != null
+      ? FlutterControl.page(_id!, initial: widget.p.i('initialPage') ?? widget.p.i('page') ?? 0)
+      : PageController(initialPage: widget.p.i('initialPage') ?? widget.p.i('page') ?? 0);
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (_id == null) _controller.dispose();
     super.dispose();
   }
 

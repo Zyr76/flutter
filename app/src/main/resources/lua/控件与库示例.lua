@@ -143,6 +143,50 @@ hello("AndroLua")
 end
 
 -- ============================================================
+-- 8) Flutter 控件控制：dartCall('flutterControl', {id, action, ...})
+--    属性用 id.dart.X=值；命令（滚动/翻页/文本/媒体）走这里
+-- ============================================================
+local function pageCtl()
+  local host = FrameLayout(activity)
+  渲染Flutter({
+    Scaffold, backgroundColor = "#FFFFFF",
+    body = { Column,
+      { TextField, id = "tf", hint = "输入点东西", padding = 8 },
+      { Expanded, {
+          ListView, id = "lv", itemCount = 200,
+          itemTemplate = { ListTile, title = { Text, text = "$index 行" } },
+        } },
+    },
+  }, host)
+
+  local bar = LinearLayout(activity)
+  bar.setOrientation(LinearLayout.HORIZONTAL)
+  local function b(t, fn)
+    local x = Button(activity); x.setText(t); x.setOnClickListener(fn); bar.addView(x)
+  end
+  local function ctl(id, action, extra)
+    local a = { id = id, action = action }
+    if extra then for k, v in pairs(extra) do a[k] = v end end
+    dartCall("flutterControl", a, function(res, err)
+      print("[ctl]", action, err or tostring(res))
+    end)
+  end
+
+  b("列表:到底", function() ctl("lv", "scrollToEnd") end)
+  b("列表:回顶", function() ctl("lv", "scrollToStart") end)
+  b("列表:+500", function() ctl("lv", "scrollBy", { delta = 500 }) end)
+  b("输入:写入", function() ctl("tf", "setText", { text = "来自 Lua 的文字" }) end)
+  b("输入:清空", function() ctl("tf", "clear") end)
+  b("输入:聚焦", function() ctl("tf", "focus") end)
+
+  local root = LinearLayout(activity)
+  root.setOrientation(LinearLayout.VERTICAL)
+  root.addView(host, LinearLayout.LayoutParams(-1, 0, 1))
+  root.addView(bar, LinearLayout.LayoutParams(-1, -2))
+  return root
+end
+
+-- ============================================================
 -- 顶部按钮 + 内容区
 -- ============================================================
 local pages = {
@@ -150,6 +194,7 @@ local pages = {
   { "流式布局", pageFlow },
   { "图片", pageImage },
   { "网络", pageNet },
+  { "Flutter控制", pageCtl },
   { "网页", pageWeb },
   { "编辑器", pageEditor },
 }
