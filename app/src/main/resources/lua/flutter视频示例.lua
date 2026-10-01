@@ -26,7 +26,7 @@ local host = FrameLayout(activity)
     { Text, id = "status", text = "状态：准备中…", fontSize = 14, padding = 8 },
     { Expanded, {
         VideoPlayer, id = "v", url = URL,
-        controls = true,        -- 自带一个播放/暂停按钮
+        controls = false,       -- 不自带播放/暂停按钮（我们用自己的控制条）；要就改 true
         -- autoPlay = true,     -- 想自动播放就打开
         -- loop = true,         -- 想循环就打开
       } },
@@ -60,12 +60,14 @@ local function seekBy(deltaMs)
   end)
 end
 
--- Flutter -> Lua 事件（ready / state / completed / error）
+-- Flutter -> Lua 事件（ready / state / buffering / completed / error）
 function onFlutterEvent(e)
   if e and e.name == "flutterVideoEvent" then
     local d = e.data or {}
-    show(string.format("%s  %d/%d ms%s", tostring(d.type),
-      d.position or 0, d.duration or 0, d.isPlaying and "  ▶ 播放中" or ""))
+    show(string.format("%s  %d/%d ms%s%s", tostring(d.type),
+      d.position or 0, d.duration or 0,
+      d.isPlaying and "  ▶ 播放中" or "",
+      d.isBuffering and "  ⏳ 缓冲中" or ""))
   end
 end
 

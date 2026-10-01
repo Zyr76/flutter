@@ -2903,6 +2903,7 @@ class _BridgeVideoState extends State<BridgeVideo> {
   VideoPlayerController? _controller;
   String? _error;
   bool? _lastPlaying;
+  bool? _lastBuffering;
   bool _completedSent = false;
 
   @override
@@ -2936,17 +2937,27 @@ class _BridgeVideoState extends State<BridgeVideo> {
   void _onControllerChanged() {
     final c = _controller;
     if (c == null) return;
-    final playing = c.value.isPlaying;
+    final v = c.value;
+    final playing = v.isPlaying;
+    final buffering = v.isBuffering;
+    final needRebuild = playing != _lastPlaying || buffering != _lastBuffering;
+
     if (playing != _lastPlaying) {
       _lastPlaying = playing;
       FlutterVideo.emitEvent(widget.id, 'state', stateMap());
     }
-    final v = c.value;
+    if (buffering != _lastBuffering) {
+      _lastBuffering = buffering;
+      FlutterVideo.emitEvent(widget.id, 'buffering', stateMap());
+    }
     if (!_completedSent && v.duration > Duration.zero && v.position >= v.duration && !playing) {
       _completedSent = true;
       FlutterVideo.emitEvent(widget.id, 'completed', stateMap());
     }
     if (v.isPlaying) _completedSent = false;
+
+    // 播放/暂停、缓冲状态变化时需要重绘（否则图标/转圈不刷新）
+    if (needRebuild && mounted) setState(() {});
   }
 
   /// 当前播放状态（位置/时长/是否在播/缓冲等），供 Lua 查询。
@@ -2960,8 +2971,16 @@ class _BridgeVideoState extends State<BridgeVideo> {
       'position': v?.position.inMilliseconds ?? 0,
       'duration': v?.duration.inMilliseconds ?? 0,
       'isPlaying': v?.isPlaying ?? false,
+      'isBuffering': v?.isBuffering ?? false,
+      'isInitialized': v?.isInitialized ?? false,
+      'isCompleted': v?.isCompleted ?? false,
       'buffered': bufferedMs,
+      'volume': v?.volume ?? 1.0,
+      'speed': v?.playbackSpeed ?? 1.0,
       'aspectRatio': v?.aspectRatio ?? 1.0,
+      'width': v?.size.width ?? 0,
+      'height': v?.size.height ?? 0,
+      'error': v?.errorDescription,
     };
   }
 
@@ -3025,13 +3044,18 @@ class _BridgeVideoState extends State<BridgeVideo> {
     if (c == null || !c.value.isInitialized) {
       return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()));
     }
+    final v = c.value;
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c)),
+      Stack(alignment: Alignment.center, children: [
+        AspectRatio(aspectRatio: v.aspectRatio, child: VideoPlayer(c)),
+        // 缓冲/卡顿中显示转圈（由 isBuffering 驱动）
+        if (v.isBuffering) const CircularProgressIndicator(),
+      ]),
       if (widget.showControls)
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           IconButton(
-            icon: Icon(c.value.isPlaying ? Icons.pause : Icons.play_arrow),
-            onPressed: () => setState(() => c.value.isPlaying ? c.pause() : c.play()),
+            icon: Icon(v.isPlaying ? Icons.pause : Icons.play_arrow),
+            onPressed: () => setState(() => v.isPlaying ? c.pause() : c.play()),
           ),
         ]),
     ]);
