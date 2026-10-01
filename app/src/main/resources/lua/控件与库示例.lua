@@ -124,6 +124,8 @@ end
 -- ============================================================
 local function pageSora()
   local ed = CodeEditor(activity)
+  -- 挂上内置的 Lua 语言：关键字/字符串/注释/数字/运算符高亮
+  pcall(function() ed.setEditorLanguage(LuaLanguage()) end)
   ed.setText([[
 -- SoraEditor 示例
 local function hello(name)
