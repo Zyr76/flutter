@@ -589,7 +589,9 @@ public final class FlutterLuaBridge {
         if (entry == null || !entry.isTable()) {
             return false;
         }
-        String type = event.optString("type", "");
+        // 事件类型在 data 里（事件包是 {name, data}），不能在顶层取
+        JSONObject data = event.optJSONObject("data");
+        String type = data == null ? "" : data.optString("type", "");
         String[] keys = "change".equals(type)
                 ? new String[]{"onChange", "onChanged"}
                 : new String[]{"onClick", "onTap", "click"};

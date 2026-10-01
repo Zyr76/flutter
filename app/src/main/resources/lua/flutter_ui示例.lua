@@ -45,11 +45,14 @@ local function pageBasic()
         { Container, height = 80, radius = 12, alignment = "center",
           gradient = { colors = { "#4facfe", "#00f2fe" } },
           { Text, text = "Container + 渐变", color = "#ffffff", fontSize = 16 } },
-        -- 按钮（带 id → 点击回调叫 按钮.onClick）
-        { Row, gap = 10,
-          { ElevatedButton, id = "btnA", text = "改上面的文字" },
-          { FilledButton, id = "btnB", text = "弹 SnackBar" },
-          { OutlinedButton, id = "btnC", text = "弹对话框" } },
+        -- 按钮：横排要能滑动必须套横向的 SingleChildScrollView
+        -- （Row 自身不可滚动，超宽只会溢出/裁剪）
+        { SingleChildScrollView, scrollDirection = "horizontal",
+          { Row, gap = 10,
+            { ElevatedButton, id = "btnA", text = "改上面的文字" },
+            { FilledButton, id = "btnB", text = "弹 SnackBar" },
+            { OutlinedButton, id = "btnC", text = "弹对话框" },
+            { TextButton, id = "btnD", text = "再一个按钮" } } },
         { Text, id = "tip", text = "等待操作…", fontSize = 13, color = "#666666" },
       },
     },
@@ -92,10 +95,10 @@ local function pageForm()
         { TextField, id = "pwd", hint = "输入密码", label = "密码", obscure = true },
         { Row, gap = 10,
           { Text, text = "开关", fontSize = 15 },
-          { Switch, id = "sw", value = false } },
+          { Switch, id = "sw", value = false, onChange = "swChange" } },
         { Text, id = "swTip", text = "开关：关", fontSize = 13, color = "#666666" },
         { Text, text = "音量", fontSize = 15 },
-        { Slider, id = "sld", value = 30, min = 0, max = 100, divisions = 10 },
+        { Slider, id = "sld", value = 30, min = 0, max = 100, divisions = 10, onChange = "sldChange" },
         { Text, id = "sldTip", text = "音量：30", fontSize = 13, color = "#666666" },
         { Row, gap = 10,
           { ElevatedButton, id = "readBtn", text = "读取输入" },
@@ -106,14 +109,17 @@ local function pageForm()
   }
 end
 
+-- Switch / Slider 的变化：用 spec 里的 onChange="函数名" 指定回调（最稳）
+-- （也可以不写 onChange，改用句柄：function sw.onChange(e) …，事件名就是 id）
+function swChange(e)
+  swTip.dart.Text = "开关：" .. (e.value and "开" or "关")
+end
+
+function sldChange(e)
+  sldTip.dart.Text = "音量：" .. tostring(math.floor((e.value or 0) + 0.5))
+end
+
 local function bindForm()
-  -- Switch / Slider 变化：事件名 = id
-  function sw.onChange(e)
-    swTip.dart.Text = "开关：" .. (e.value and "开" or "关")
-  end
-  function sld.onChange(e)
-    sldTip.dart.Text = "音量：" .. tostring(math.floor(e.value + 0.5))
-  end
   -- 命令：读文本 / 清空 / 聚焦（flutterControl）
   function readBtn.onClick(e)
     dartCall("flutterControl", { id = "name", action = "textState" }, function(res, err)
@@ -164,6 +170,10 @@ end
 local PAGES = { pageBasic, pageForm, pageList }
 local BINDS = { bindBasic, bindForm, nil }
 
+-- 注意：这两个要在 show 之前先声明（Lua 没有变量提升，否则 show 里会当成全局 nil）
+local bar
+local scrollBar
+
 local function show(p)
   page = p
   host.removeAllViews()
@@ -181,7 +191,7 @@ function onFlutterEvent(e)
 end
 
 -- 底部页切换（原生按钮）
-local bar = LinearLayout(activity)
+bar = LinearLayout(activity)
 bar.setOrientation(LinearLayout.HORIZONTAL)
 local function tabBtn(name, idx)
   local b = Button(activity)
@@ -193,7 +203,7 @@ tabBtn("布局", 1)
 tabBtn("表单", 2)
 tabBtn("列表", 3)
 
-local scrollBar = LinearLayout(activity)
+scrollBar = LinearLayout(activity)
 scrollBar.setOrientation(LinearLayout.HORIZONTAL)
 local function sBtn(name, action, extra)
   local b = Button(activity)
