@@ -72,7 +72,11 @@
             android:enabled="true"
                    android:exported="true"
             android:launchMode="singleTask"
-            android:theme="@style/app_theme">
+            android:theme="@style/SplashTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.EDIT" />
@@ -217,18 +221,6 @@
             android:excludeFromRecents="false"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
             android:theme="@style/PluginTheme" />
-        <activity
-            android:name="com.androlua.Welcome"
-            android:label="AndroLua+"
-                   android:exported="true"
-            android:enabled="true"
-            android:screenOrientation="portrait"
-            android:theme="@style/SplashTheme">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
         <activity
             android:name="com.nirenr.screencapture.ScreenCaptureActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />

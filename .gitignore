@@ -30,3 +30,6 @@ flutter_bridge/.android/plugins_build_output/
 
 # ---- 插件 dex demo 构建产物 ----
 plugin-dex-demo/out/
+
+# ---- 根目录构建产物 ----
+/*.apk
