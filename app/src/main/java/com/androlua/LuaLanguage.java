@@ -1,19 +1,29 @@
 package com.androlua;
 
+import android.os.Bundle;
+
 import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 import io.github.rosemoe.sora.lang.EmptyLanguage;
 import io.github.rosemoe.sora.lang.analysis.AnalyzeManager;
 import io.github.rosemoe.sora.lang.analysis.SimpleAnalyzeManager;
+import io.github.rosemoe.sora.lang.completion.CompletionHelper;
+import io.github.rosemoe.sora.lang.completion.CompletionItem;
+import io.github.rosemoe.sora.lang.completion.CompletionItemKind;
+import io.github.rosemoe.sora.lang.completion.CompletionPublisher;
+import io.github.rosemoe.sora.lang.completion.SimpleCompletionItem;
 import io.github.rosemoe.sora.lang.styling.MappedSpans;
 import io.github.rosemoe.sora.lang.styling.Span;
 import io.github.rosemoe.sora.lang.styling.Styles;
 import io.github.rosemoe.sora.lang.styling.TextStyle;
+import io.github.rosemoe.sora.text.CharPosition;
+import io.github.rosemoe.sora.text.ContentReference;
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme;
 
 /**
@@ -32,6 +42,86 @@ public class LuaLanguage extends EmptyLanguage {
             "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto",
             "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true",
             "until", "while"));
+
+    /** 常用内置函数 / 库 / AndroLua 全局，用于补全。 */
+    private static final String[] BUILTINS = {
+            "assert", "collectgarbage", "dofile", "error", "getmetatable", "ipairs", "load",
+            "loadfile", "loadstring", "next", "pairs", "pcall", "print", "rawequal", "rawget",
+            "rawlen", "rawset", "require", "select", "setmetatable", "tonumber", "tostring",
+            "type", "unpack", "xpcall", "tointeger", "_G", "_VERSION", "self",
+            "string", "string.byte", "string.char", "string.dump", "string.find", "string.format",
+            "string.gmatch", "string.gsub", "string.len", "string.lower", "string.match",
+            "string.rep", "string.reverse", "string.sub", "string.upper",
+            "table", "table.concat", "table.insert", "table.move", "table.pack", "table.remove",
+            "table.sort", "table.unpack",
+            "math", "math.abs", "math.ceil", "math.floor", "math.max", "math.min", "math.random",
+            "math.sqrt", "math.tointeger",
+            "os", "os.date", "os.time", "os.clock", "os.exit", "os.getenv", "os.remove",
+            "io", "io.open", "io.read", "io.write", "io.close", "io.lines",
+            "coroutine", "coroutine.create", "coroutine.resume", "coroutine.status",
+            "coroutine.wrap", "coroutine.yield",
+            "activity", "service", "import", "loadlayout", "loadbitmap", "loadmenu", "thread",
+            "task", "timer", "call", "set", "luajava", "python", "dump", "each", "enum", "override"
+    };
+    private static final Set<String> BUILTIN_SET = new HashSet<String>(Arrays.asList(BUILTINS));
+
+    /**
+     * Sora 在用户输入时调用：按光标前缀给出 关键字 / 内置 API / 文档内标识符 的补全。
+     */
+    @Override
+    public void requireAutoComplete(@NonNull ContentReference content, @NonNull CharPosition position,
+                                    @NonNull CompletionPublisher publisher, @NonNull Bundle extraArguments) {
+        String prefix = CompletionHelper.computePrefix(content, position,
+                ch -> ch == '_' || Character.isLetterOrDigit(ch));
+        if (prefix.isEmpty())
+            return;
+
+        LinkedHashSet<String> words = new LinkedHashSet<String>();
+        words.addAll(KEYWORDS);
+        words.addAll(BUILTIN_SET);
+        collectIdentifiers(content, words);
+
+        final int plen = prefix.length();
+        ArrayList<CompletionItem> items = new ArrayList<CompletionItem>();
+        for (String w : words) {
+            if (w.length() <= plen || w.equals(prefix))
+                continue;
+            if (!w.regionMatches(true, 0, prefix, 0, plen))
+                continue;
+            CompletionItemKind kind = KEYWORDS.contains(w) ? CompletionItemKind.Keyword
+                    : BUILTIN_SET.contains(w) ? CompletionItemKind.Function
+                    : CompletionItemKind.Identifier;
+            items.add(new SimpleCompletionItem(w, plen, w).desc("Lua").kind(kind));
+            if (items.size() >= 500)
+                break;
+        }
+        if (!items.isEmpty())
+            publisher.addItems(items);
+    }
+
+    /** 从文档里收集标识符，作为补全候选。 */
+    private static void collectIdentifiers(ContentReference content, Set<String> out) {
+        final int lines = content.getLineCount();
+        int budget = 20000;
+        for (int i = 0; i < lines && budget > 0; i++) {
+            String line = content.getLine(i);
+            int n = line.length(), j = 0;
+            while (j < n) {
+                char c = line.charAt(j);
+                if (c == '_' || Character.isLetter(c)) {
+                    int k = j + 1;
+                    while (k < n && (line.charAt(k) == '_' || Character.isLetterOrDigit(line.charAt(k))))
+                        k++;
+                    if (k - j >= 2)
+                        out.add(line.substring(j, k));
+                    budget--;
+                    j = k;
+                } else {
+                    j++;
+                }
+            }
+        }
+    }
 
     @NonNull
     @Override
