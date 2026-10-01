@@ -18,9 +18,6 @@ class FlutterBridge {
 
   static const MethodChannel channel = MethodChannel('androlua/flutter');
 
-  /// 给 Flutter 里嵌的原生 AndroidView 用的通道。
-  static const MethodChannel nativeViewChannel = MethodChannel('androlua/nativeview');
-
   /// 给 Flutter 里嵌的原生视频播放器（VideoView）用的通道。
   static const MethodChannel videoChannel = MethodChannel('androlua/video');
 
@@ -51,7 +48,6 @@ class FlutterBridge {
     registerDefaultHandlers(handlers);
     _registerVideoHandlers();
     channel.setMethodCallHandler(_onMethodCall);
-    nativeViewChannel.setMethodCallHandler(_onNativeViewCall);
     videoChannel.setMethodCallHandler(_onVideoCall);
   }
 
@@ -88,14 +84,6 @@ class FlutterBridge {
   /// 原生视频播放器回传的事件（prepared / completion / error）。
   Future<dynamic> _onVideoCall(MethodCall call) async {
     emit('videoEvent', {'event': call.method, 'data': call.arguments});
-    return null;
-  }
-
-  /// Flutter 里嵌的 AndroidView（原生控件）回传的消息。
-  Future<dynamic> _onNativeViewCall(MethodCall call) async {
-    if (call.method == 'click') {
-      emit('nativeViewClick', {'text': call.arguments});
-    }
     return null;
   }
 

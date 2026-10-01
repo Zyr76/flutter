@@ -115,8 +115,6 @@ end
 
 **插件控件**：`QrCode`/`QrImageView`（qr_flutter）、`FlutterMap`（flutter_map，`center`/`zoom`/`markers`/`polylines`/`polygons`/`circles`/`tileUrl`）、`LineChart`/`BarChart`/`PieChart`（fl_chart，`series` 或 `groups`）、`VideoPlayer`、`AudioPlayer`
 
-**原生/混合**：`AndroidView`（`viewType`，Flutter 里嵌 Android 原生控件）
-
 ---
 
 ## 3. 动态改属性：`id.dart.属性 = 值`

@@ -1,9 +1,9 @@
 -- ============================================================
 -- Flutter UI 使用示例（完整版）
 --
--- 菜单 → 12 个演示页，覆盖常用控件族：
+-- 菜单 → 11 个演示页，覆盖常用控件族：
 --   布局 / 文本 / 按钮 / 输入与选择 / 列表与网格 / 卡片与信息
---   导航(标签页/抽屉/底栏) / 弹窗与提示 / 动画 / 图表与二维码 / 媒体 / 原生混合
+--   导航(标签页/抽屉/底栏) / 弹窗与提示 / 动画 / 图表与二维码 / 媒体
 --
 -- 三套交互手段都在这里用到：
 --   1) 属性：  节点.dart.属性 = 值          （任意带 id 的控件，运行期即时生效）
@@ -481,28 +481,6 @@ end
 
 function vBack() vSeekBy(-5000) end
 function vFwd() vSeekBy(5000) end
-
--- ============================================================
--- 12) 原生混合
--- ============================================================
-DEMOS[#DEMOS + 1] = { "原生混合", "AndroidView：把 Android 原生控件嵌进 Flutter", function()
-  -- 原生控件在 Lua 里照常 new，直接写进布局表就行（引擎序列化时自动登记引用）
-  local 原生卡 = TextView(activity)
-  原生卡.setText("我是 Lua 里 new 出来的原生 TextView")
-  原生卡.setTextSize(16)
-  原生卡.setPadding(40, 32, 40, 32)
-  原生卡.setBackgroundColor(0xffe3f2fd)
-
-  return shell("原生混合", {
-    SingleChildScrollView, padding = 12,
-    { Column, gap = 12,
-      { Text, text = "下面是嵌在 Flutter 里的原生 Android 控件（AndroidView）：" },
-      { Container, height = 200, radius = 8, color = "#eeeeee",
-        { AndroidView, view = 原生卡 } },
-      { Text, text = "只给 params = { text = \"…\" } 则会用内置演示控件；反过来 Flutter 也能塞进原生布局（见 flutter示例.lua 的原生区）。", fontSize = 13, color = "#666666" },
-    },
-  })
-end }
 
 -- ============================================================
 -- 菜单 + 路由

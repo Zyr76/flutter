@@ -1518,15 +1518,6 @@ class Renderer {
         break;
 
       // ---------- 原生 ----------
-      case 'androidview':
-        result = AndroidView(
-          viewType: (p['viewType'] ?? p['view'] ?? 'androlua/native').toString(),
-          layoutDirection: TextDirection.ltr,
-          creationParams: _creationParams(p),
-          creationParamsCodec: const StandardMessageCodec(),
-        );
-        break;
-
       default:
         if (children.isNotEmpty) {
           result = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
@@ -1947,21 +1938,6 @@ class Renderer {
     if (v == null) return null;
     if (v is Map || v is List) return _build(v, path);
     return Icon(Props.toIcon(v));
-  }
-
-  static dynamic _creationParams(Props p) {
-    final params = p['params'];
-    // 原生控件对象由引擎序列化成内部引用，原样转发给平台视图工厂
-    final view = p['view'];
-    if (params is Map) {
-      if (view == null) return params.cast<String, dynamic>();
-      return <String, dynamic>{...params.cast<String, dynamic>(), 'view': view};
-    }
-    return <String, dynamic>{
-      'text': (p['text'] ?? '原生 AndroidView').toString(),
-      'background': p['background']?.toString(),
-      if (view != null) 'view': view,
-    };
   }
 
   static String? _decText(Props p, String key) {

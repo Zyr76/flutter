@@ -95,9 +95,6 @@ public class FlutterLua {
         engine = sEngineGroup.createAndRunEngine(app, entrypoint);
 
         engine.getPlatformViewsController().getRegistry()
-                .registerViewFactory("androlua/native",
-                        new NativeWidgetFactory(engine.getDartExecutor().getBinaryMessenger()));
-        engine.getPlatformViewsController().getRegistry()
                 .registerViewFactory("androlua/video",
                         new VideoViewFactory(engine.getDartExecutor().getBinaryMessenger()));
 

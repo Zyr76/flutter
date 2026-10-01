@@ -1,7 +1,5 @@
 package com.androlua.flutter;
 
-import android.view.View;
-
 import com.luajava.LuaState;
 
 import org.json.JSONArray;
@@ -72,13 +70,6 @@ public final class LuaJson {
             case LuaState.LUA_TUSERDATA:
                 try {
                     Object o = L.toJavaObject(abs);
-                    if (o instanceof View) {
-                        // 布局表里直接写控件对象（{ AndroidView, view = 控件 }）：登记成内部引用，
-                        // 序列化后 Dart 只当数据转发，平台视图工厂再按引用把控件取回来。
-                        Map<String, Object> ref = new LinkedHashMap<String, Object>();
-                        ref.put(NativeWidgetFactory.REF_KEY, NativeWidgetFactory.putRef((View) o));
-                        return ref;
-                    }
                     if (o != null) {
                         return o;
                     }
@@ -346,7 +337,7 @@ public final class LuaJson {
                 "Icon", "Image", "Card", "ListView", "GridView", "Wrap", "Align", "AspectRatio",
                 "ClipRRect", "Opacity", "SafeArea", "Positioned", "CircleAvatar", "Chip",
                 "Checkbox", "Slider", "Switch", "TextField", "Divider",
-                "CircularProgressIndicator", "LinearProgressIndicator", "ListTile", "AndroidView",
+                "CircularProgressIndicator", "LinearProgressIndicator", "ListTile",
                 // Scaffold 体系与常用控件
                 "Scaffold", "AppBar", "Drawer", "UserAccountsDrawerHeader",
                 "BottomNavigationBar", "BottomNavigationBarItem", "TabBar", "Tab", "TabBarView",

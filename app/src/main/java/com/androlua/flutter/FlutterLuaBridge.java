@@ -105,8 +105,6 @@ public final class FlutterLuaBridge {
             @Override
             public int execute() throws LuaException {
                 FlutterLua flutter = flutter(context);
-                // 整棵布局重渲染：上一版登记的原生控件引用已无人使用，清掉（新 spec 会在序列化时重新登记）
-                NativeWidgetFactory.clearRefs();
                 String json = L.isString(2) ? L.toString(2) : LuaJson.encodeSpec(L, 2);
                 try {
                     JSONObject root = new JSONObject(json);
