@@ -688,7 +688,16 @@ class Renderer {
         result = TabBarView(children: children);
         break;
       case 'defaulttabcontroller':
-        result = DefaultTabController(length: p.i('length') ?? 1, child: child0());
+        final tabId = p['id']?.toString();
+        final tabLen = p.i('length') ?? 1;
+        final tabIndex = (p.i('index') ?? p.i('initialIndex') ?? 0).clamp(0, tabLen - 1);
+        // 带 id 时把 index 编进 key：Lua 侧 `tabs.dart.Index = n` 会重建控制器 → 运行期切页
+        result = DefaultTabController(
+          key: tabId != null ? ValueKey('tabs:$tabId:$tabIndex') : null,
+          length: tabLen,
+          initialIndex: tabIndex,
+          child: child0(),
+        );
         break;
 
       // ---------- 二维码 / 地图 / 图表 / 媒体 ----------
@@ -718,6 +727,7 @@ class Renderer {
         break;
       case 'audioplayer':
         result = BridgeAudio(
+          id: p['id']?.toString(),
           url: (p['url'] ?? p['src'] ?? '').toString(),
           title: p.s('title') ?? p.s('text'),
           autoPlay: p.b('autoPlay'),
@@ -753,6 +763,7 @@ class Renderer {
         final refreshCb = p['onRefresh'];
         final refreshId = p['id'];
         result = RefreshIndicator(
+          key: refreshId != null ? FlutterControl.refreshKey(refreshId.toString()) : null,
           onRefresh: () async {
             // 支持声明式 onRefresh="函数名" / { event=..., args=... }，也兼容旧的 id 写法
             if (refreshCb is String) {
@@ -806,10 +817,14 @@ class Renderer {
         );
         break;
       case 'expansiontile':
+        final expId = p['id']?.toString();
+        final expOpen = p.b('expanded') || p.b('initiallyExpanded');
+        // 带 id 时把展开态编进 key：Lua 侧 `tile.dart.Expanded = true/false` 即可展开/收起
         result = ExpansionTile(
+          key: expId != null ? ValueKey('exp:$expId:$expOpen') : null,
           title: _slotText(p['title'] ?? p['text'], '$path/title') ?? const SizedBox.shrink(),
           subtitle: _slotText(p['subtitle'], '$path/subtitle'),
-          initiallyExpanded: p.b('expanded') || p.b('initiallyExpanded'),
+          initiallyExpanded: expOpen,
           children: children,
         );
         break;
@@ -1472,7 +1487,10 @@ class Renderer {
         break;
       case 'searchbar':
         final trailing = _children(p['trailing'], '$path/trailing');
+        final sbId = p['id']?.toString();
         result = SearchBar(
+          controller: sbId != null ? FlutterControl.text(sbId) : null,
+          focusNode: sbId != null ? FlutterControl.focusNode(sbId) : null,
           hintText: p.s('hint') ?? p.s('hintText'),
           leading: p['leading'] != null ? Icon(Props.toIcon(p['leading'])) : null,
           trailing: trailing.isEmpty ? null : trailing,
@@ -2753,6 +2771,30 @@ class FlutterVideo {
   static void emitState(String? id, _BridgeVideoState s) => emitEvent(id, 'ready', s.stateMap());
 }
 
+/// 音频播放器控制注册表（just_audio）。用法与 FlutterVideo 相同：
+/// `dartCall('flutterControl', {id=, action=, ...})`，事件名 `flutterAudioEvent`。
+class FlutterAudio {
+  static final Map<String, _BridgeAudioState> _states = {};
+
+  static void attach(String id, _BridgeAudioState s) => _states[id] = s;
+
+  static void detach(String id, _BridgeAudioState s) {
+    if (identical(_states[id], s)) _states.remove(id);
+  }
+
+  static Future<Map<String, dynamic>?> tryCall(Map<String, dynamic> a) async {
+    final s = _states[(a['id'] ?? '').toString()];
+    if (s == null) return null;
+    final action = (a['action'] ?? '').toString();
+    if (action.isEmpty) return {'error': 'need action'};
+    return s.control(action, a);
+  }
+
+  static void emitEvent(String? id, String type, Map<String, dynamic> data) {
+    FlutterBridge.instance.emit('flutterAudioEvent', {'id': id, 'type': type, ...data});
+  }
+}
+
 /// Flutter 控件的统一控制中心（命令式）。
 ///
 /// 分工：
@@ -2766,14 +2808,25 @@ class FlutterVideo {
 ///    `scrollToEnd` `scrollToStart` `scrollState`
 ///  * 翻页（PageView）：`pageTo(index)` `nextPage` `prevPage` `pageState`
 ///  * 文本框（TextField/TextFormField）：`setText(text)` `clear` `focus` `unfocus` `textState`
-///  * 媒体（VideoPlayer）：`play` `pause` `toggle` `seek(pos)` `seekPercent(percent)`
-///    `volume(v)` `speed(x)` `loop(bool)` `state`
+///  * 媒体：VideoPlayer（play/pause/toggle/seek/seekPercent/volume/speed/loop/state）
+///    与 AudioPlayer（多一个 stop）；`listenProgress(enabled, interval)` 开启/关闭**持续监听**：
+///    每隔 interval 毫秒（默认 500）推一个 `flutterVideoEvent`/`flutterAudioEvent`(type=progress)，
+///    带 position/duration/buffered/isPlaying/isBuffering，用于进度条/时间轴。
+///  * 下拉刷新（RefreshIndicator）：`refresh`
 ///  * 抽屉：`openDrawer` `closeDrawer`
+///
+/// 另外这些“只认初始值”的控件已改成**可运行期改**（改属性即生效）：
+///  * DefaultTabController：`tabs.dart.Index = n` 切页
+///  * ExpansionTile：`tile.dart.Expanded = true/false` 展开/收起
 class FlutterControl {
   static final Map<String, ScrollController> _scrolls = {};
   static final Map<String, PageController> _pages = {};
   static final Map<String, TextEditingController> _texts = {};
   static final Map<String, FocusNode> _focusNodes = {};
+  static final Map<String, GlobalKey<RefreshIndicatorState>> _refreshKeys = {};
+
+  static GlobalKey<RefreshIndicatorState> refreshKey(String id) =>
+      _refreshKeys.putIfAbsent(id, () => GlobalKey<RefreshIndicatorState>());
 
   static ScrollController scroll(String id) => _scrolls.putIfAbsent(id, () => ScrollController());
 
@@ -2799,9 +2852,11 @@ class FlutterControl {
     final action = (args['action'] ?? '').toString();
     if (id.isEmpty || action.isEmpty) return {'error': 'need id and action'};
 
-    // 1) 视频 / 媒体
+    // 1) 媒体：视频 → 音频
     final media = await FlutterVideo.tryCall(args);
     if (media != null) return media;
+    final audio = await FlutterAudio.tryCall(args);
+    if (audio != null) return audio;
 
     // 2) 滚动
     final sc = _scrolls[id];
@@ -2873,7 +2928,17 @@ class FlutterControl {
       }
     }
 
-    // 5) 抽屉
+    // 5) 下拉刷新
+    if (action == 'refresh') {
+      final st = _refreshKeys[id]?.currentState;
+      if (st != null) {
+        st.show();
+        return {'ok': true};
+      }
+      return {'error': 'no RefreshIndicator for id=$id'};
+    }
+
+    // 6) 抽屉
     if (action == 'openDrawer') {
       Renderer.scaffoldKey.currentState?.openDrawer();
       return {'ok': true};
@@ -2905,6 +2970,7 @@ class _BridgeVideoState extends State<BridgeVideo> {
   bool? _lastPlaying;
   bool? _lastBuffering;
   bool _completedSent = false;
+  Timer? _progressTimer;
 
   @override
   void initState() {
@@ -3019,6 +3085,12 @@ class _BridgeVideoState extends State<BridgeVideo> {
       case 'loop':
         await c.setLooping(a['loop'] == true);
         break;
+      case 'listenProgress':
+        // 持续监听：enabled=false 或 interval<=0 则停止
+        final enabled = a['enabled'] == null ? true : a['enabled'] == true;
+        final ms = (a['interval'] as num?)?.toInt() ?? 500;
+        _startProgress(enabled ? ms : 0);
+        break;
       case 'state':
         break;
       default:
@@ -3027,9 +3099,20 @@ class _BridgeVideoState extends State<BridgeVideo> {
     return {'ok': true, ...stateMap()};
   }
 
+  /// 开始/停止周期推送 progress 事件（ms<=0 表示停止）。
+  void _startProgress(int ms) {
+    _progressTimer?.cancel();
+    _progressTimer = null;
+    if (ms <= 0) return;
+    _progressTimer = Timer.periodic(Duration(milliseconds: ms), (_) {
+      FlutterVideo.emitEvent(widget.id, 'progress', stateMap());
+    });
+  }
+
   @override
   void dispose() {
     if (widget.id != null) FlutterVideo.detach(widget.id!, this);
+    _progressTimer?.cancel();
     _controller?.removeListener(_onControllerChanged);
     _controller?.dispose();
     super.dispose();
@@ -3064,7 +3147,8 @@ class _BridgeVideoState extends State<BridgeVideo> {
 
 /// 音频播放器（网络/本地 URL，含进度条）。
 class BridgeAudio extends StatefulWidget {
-  const BridgeAudio({super.key, required this.url, this.title, this.autoPlay = false});
+  const BridgeAudio({super.key, required this.url, this.id, this.title, this.autoPlay = false});
+  final String? id;
   final String url;
   final String? title;
   final bool autoPlay;
@@ -3079,11 +3163,89 @@ class _BridgeAudioState extends State<BridgeAudio> {
   String? _error;
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<PlayerState>? _stateSub;
+  Timer? _progressTimer;
 
   @override
   void initState() {
     super.initState();
+    if (widget.id != null) FlutterAudio.attach(widget.id!, this);
     _init();
+  }
+
+  /// 当前状态（供 Lua 查询）。
+  Map<String, dynamic> stateMap() => {
+        'position': _position.inMilliseconds,
+        'duration': _duration.inMilliseconds,
+        'isPlaying': _player.playing,
+        'volume': _player.volume,
+        'speed': _player.speed,
+        'error': _error,
+      };
+
+  /// 执行控制命令（与视频同构：play/pause/toggle/stop/seek/seekPercent/volume/speed/loop/listenProgress/state）。
+  Future<Map<String, dynamic>> control(String action, Map<String, dynamic> a) async {
+    switch (action) {
+      case 'play':
+        await _player.play();
+        break;
+      case 'pause':
+        await _player.pause();
+        break;
+      case 'toggle':
+        if (_player.playing) {
+          await _player.pause();
+        } else {
+          await _player.play();
+        }
+        break;
+      case 'stop':
+        await _player.stop();
+        break;
+      case 'seek':
+        await _player.seek(Duration(milliseconds: (a['pos'] as num?)?.toInt() ?? 0));
+        break;
+      case 'seekPercent':
+        final dur = (_player.duration ?? _duration).inMilliseconds;
+        final pct = (a['percent'] as num?)?.toDouble() ?? 0;
+        await _player.seek(Duration(milliseconds: (dur * pct / 100).round()));
+        break;
+      case 'volume':
+        await _player.setVolume(((a['volume'] as num?) ?? 1).toDouble().clamp(0.0, 1.0));
+        break;
+      case 'speed':
+        await _player.setSpeed(((a['speed'] as num?) ?? 1).toDouble());
+        break;
+      case 'loop':
+        await _player.setLoopMode(a['loop'] == true ? LoopMode.one : LoopMode.off);
+        break;
+      case 'listenProgress':
+        final enabled = a['enabled'] == null ? true : a['enabled'] == true;
+        final ms = (a['interval'] as num?)?.toInt() ?? 500;
+        _progressTimer?.cancel();
+        _progressTimer = null;
+        if (enabled && ms > 0) {
+          _progressTimer = Timer.periodic(Duration(milliseconds: ms), (_) {
+            FlutterAudio.emitEvent(widget.id, 'progress', stateMap());
+          });
+        }
+        break;
+      case 'state':
+        break;
+      default:
+        return {'error': 'unknown action: $action'};
+    }
+    if (mounted) setState(() {});
+    return {'ok': true, ...stateMap()};
+  }
+
+  @override
+  void dispose() {
+    if (widget.id != null) FlutterAudio.detach(widget.id!, this);
+    _progressTimer?.cancel();
+    _posSub?.cancel();
+    _stateSub?.cancel();
+    _player.dispose();
+    super.dispose();
   }
 
   Future<void> _init() async {
