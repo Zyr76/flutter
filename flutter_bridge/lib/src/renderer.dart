@@ -3260,14 +3260,6 @@ class _BridgeAudioState extends State<BridgeAudio> {
     }
   }
 
-  @override
-  void dispose() {
-    _posSub?.cancel();
-    _stateSub?.cancel();
-    _player.dispose();
-    super.dispose();
-  }
-
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
