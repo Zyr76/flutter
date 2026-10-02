@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置。
+
+  targetSdk >= 28 时 Android 默认禁止明文流量（http:// 与 ws://），
+  而 AndroLua 作为脚本环境经常要连本机/局域网的调试服务，所以这里允许明文：
+    * 默认（base-config）放行明文 —— ws:// / http:// 任意主机可用
+    * 仍然用系统信任的证书校验 https/wss
+
+  想收紧的话：把 base-config 的 cleartextTrafficPermitted 改回 false，
+  再用下面的 domain-config 只给指定主机开明文：
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+  （注意 domain 不支持通配 IP 段，局域网地址只能逐个列或整体放行。）
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
