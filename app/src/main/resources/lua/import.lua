@@ -217,26 +217,6 @@ local function env_import(env)
     import("loadlayout", _env)
     import("loadbitmap", _env)
     import("loadmenu", _env)
-
-    -- debugmode=true（在 init.lua 里设）时自动挂上调试浮窗 debug.lua。
-    -- 不能用 require "debug"：那个名字会命中标准库的 debug，文件永远不会被加载。
-    if debugmode and not _G.__debug_console_loaded then
-        _G.__debug_console_loaded = true
-        local dbgpath = package.searchpath("debug", package.path)
-        if dbgpath then
-            print("debug.lua: 找到并加载 " .. dbgpath)
-            local ok, err = pcall(function()
-                assert(loadfile(dbgpath))()
-            end)
-            if not ok then
-                print("debug.lua 加载失败: " .. tostring(err))
-                pcall(function() activity.showToast("debug.lua 加载失败: " .. tostring(err)) end)
-            end
-        else
-            print("debug.lua 没找到（package.path 里没有）: " .. tostring(package.path))
-        end
-    end
-
     return _env
 end
 
