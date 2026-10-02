@@ -224,6 +224,7 @@ local function env_import(env)
         _G.__debug_console_loaded = true
         local dbgpath = package.searchpath("debug", package.path)
         if dbgpath then
+            print("debug.lua: 找到并加载 " .. dbgpath)
             local ok, err = pcall(function()
                 assert(loadfile(dbgpath))()
             end)

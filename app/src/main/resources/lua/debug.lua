@@ -1,11 +1,13 @@
 require 'init'
 local function clear(t) for k in pairs(t) do t[k] = nil end end
 if this~=activity or not debugmode then
+print("debug.lua: 未进入调试模式（this~=activity 或 debugmode 为假），只接管了 safe_error/explain/info/warning")
 _G.safe_error=print
 _G.explain=print
 _G.info=print
 _G.warning=print
 else
+print("debug.lua: 进入调试模式，开始创建浮窗")
 local apply = luajava.bindClass
 _G.View= apply "android.view.View"
 local _print = print
@@ -91,7 +93,9 @@ ids.btn.title.getPaint().setFakeBoldText(true)
 
 -- addView 失败通常是悬浮窗权限没给（targetSdk 23+ 需用户手动开启）
 local ok,err=pcall(function() wm.addView(btn,wp) end)
-if not ok then
+if ok then
+  print("debug.lua: 浮窗已添加到右上角")
+else
   print("debug.lua: 浮窗添加失败: "..tostring(err))
   pcall(function()
     Toast.makeText(activity,"调试浮窗需要「显示在其他应用上层」权限",Toast.LENGTH_LONG).show()
