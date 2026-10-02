@@ -1770,7 +1770,7 @@ class Renderer {
           urlTemplate: tile,
           // subdomains = { "1", "2", "3", "4" } 之类；不写就用 flutter_map 默认（a/b/c）
           subdomains: p.list('subdomains').isEmpty
-              ? null
+              ? const ['a', 'b', 'c']
               : p.list('subdomains').map((e) => e.toString()).toList(),
           userAgentPackageName: p.s('userAgent') ?? 'com.androlua',
         ),
