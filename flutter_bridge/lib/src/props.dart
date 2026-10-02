@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 
 /// Props 缓存条目：保存原始对象引用，避免 identityHashCode 碰撞时误用。
 class _PropsCacheEntry {
-  _PropsCacheEntry(this.raw, this.props);
+  _PropsCacheEntry(this.raw, this.props, this.keyCount);
   final Object raw;
   final Props props;
+
+  /// 建缓存时的键数，用于 debug 下断言「同一 Map 实例没被原地改过」。
+  final int keyCount;
 }
 
 /// 属性别名：把 Lua 侧常见别名统一到规范键。规范的 Flutter 属性名保持不变。
@@ -54,11 +57,21 @@ class Props {
     if (raw is Map) {
       final id = identityHashCode(raw);
       final hit = _cache[id];
-      if (hit != null && identical(hit.raw, raw)) return hit.props;
+      if (hit != null && identical(hit.raw, raw)) {
+        assert(
+          hit.keyCount == raw.length,
+          'Props.of: 传入的 Map 被原地修改过（键数变了）。同一实例必须保持内容不变，'
+          '否则会命中缓存里的旧属性；改属性请换一个新 Map。',
+        );
+        // 命中时挪到末尾：热点条目不会被误踢（Map 按插入序迭代，这就是真 LRU）
+        _cache.remove(id);
+        _cache[id] = hit;
+        return hit.props;
+      }
       final props = Props._(normalize(raw));
-      _cache[id] = _PropsCacheEntry(raw, props);
+      _cache[id] = _PropsCacheEntry(raw, props, raw.length);
       if (_cache.length > _cacheLimit) {
-        // 简易 LRU：Map 保持插入顺序，踢掉最早的一批
+        // 超出上限就丢最早的一批（LRU：最少使用的在后面）
         final drop = _cache.keys.take(_cache.length - _cacheLimit).toList();
         for (final k in drop) {
           _cache.remove(k);
@@ -80,6 +93,48 @@ class Props {
   ///     数字下标 ≥2 的项是子节点，其余键值对是属性——会把 `"1"` 换成 `type`，
   ///     并把数字下标的项按序号收集进 `children`；
   ///  3. 其余情况原样使用（可能没有 type，渲染时会走降级分支）。
+  // 已知控件名（小写）：只用于「AndroLua 表风格」兜底判定（JSON 字符串形态的 spec、
+  // 或直接传 Map 的场景）。常规路径由原生侧归一成 {type=...}，不走这里。
+  // 扩展控件用 registerType 注册。
+  static final Set<String> knownTypes = {
+    'column', 'row', 'stack', 'container', 'padding', 'center', 'expanded', 'sizedbox', 'spacer', 'wrap',
+    'align', 'aspectratio', 'cliprrect', 'opacity', 'safearea', 'positioned', 'fractionallysizedbox',
+    'singlechildscrollview', 'transform', 'text', 'selectabletext', 'icon', 'image',
+    'elevatedbutton', 'textbutton', 'filledbutton', 'outlinedbutton', 'iconbutton', 'floatingactionbutton',
+    'materialbutton', 'card', 'circleavatar', 'chip', 'actionchip', 'filterchip', 'choicechip', 'inputchip',
+    'listtile', 'listview', 'gridview', 'divider', 'verticaldivider', 'circularprogressindicator',
+    'linearprogressindicator', 'snackbar', 'checkbox', 'switch', 'slider', 'rangeslider', 'textfield',
+    'textformfield', 'inkwell', 'gesturedetector', 'dropdownbutton', 'dropdownbuttonformfield', 'scaffold',
+    'appbar', 'drawer', 'useraccountsdrawerheader', 'bottomnavigationbar', 'bottomappbar', 'tab', 'tabbar',
+    'tabbarview', 'defaulttabcontroller', 'tooltip', 'badge', 'placeholder', 'refreshindicator', 'switchlisttile',
+    'checkboxlisttile', 'radiolisttile', 'radio', 'expansiontile', 'stepper', 'datatable', 'calendardatepicker',
+    'animatedopacity', 'animatedcontainer', 'material', 'decoratedbox', 'coloredbox', 'constrainedbox',
+    'intrinsicwidth', 'intrinsicheight', 'fittedbox', 'rotatedbox', 'clipoval', 'cliprect', 'offstage',
+    'visibility', 'absorbpointer', 'ignorepointer', 'scrollbar', 'indexedstack', 'baseline', 'limitedbox',
+    'segmentedbutton', 'togglebuttons', 'popupmenubutton', 'dismissible', 'navigationbar', 'navigationrail',
+    'navigationdrawer', 'form', 'richtext', 'cupertinoactivityindicator', 'cupertinobutton', 'cupertinoswitch',
+    'cupertinoslider', 'cupertinoalertdialog', 'cupertinonavigationbar', 'animatedalign', 'animatedpadding',
+    'animatedscale', 'animatedrotation', 'animatedslide', 'animatedswitcher', 'animateddefaulttextstyle',
+    'animatedcrossfade', 'animatedpositioned', 'animatedsize', 'animatedtheme', 'alertdialog', 'simpledialog',
+    'dialog', 'bottomsheet', 'materialbanner', 'pageview', 'dropdownmenu', 'reorderablelistview',
+    'expansionpanellist', 'table', 'customscrollview', 'slivertoboxadapter', 'sliverpadding', 'sliverlist',
+    'slivergrid', 'sliverfillremaining', 'sliverappbar', 'searchbar', 'listwheelscrollview', 'qrcode',
+    'qrimageview', 'fluttermap', 'linechart', 'barchart', 'piechart', 'videoplayer', 'audioplayer',
+  };
+
+  /// 注册自定义控件名（Renderer.register 会调），用于上面的兜底判定。
+  static void registerType(String name) => knownTypes.add(name.trim().toLowerCase());
+
+  static final Set<String> _canonicalProps = kPropAliases.values.toSet();
+  static const Set<String> _structuralKeys = {'children', 'child', 'id', 'style', 'type', 't', 'props'};
+
+  /// 这个键像不像控件属性（判定「首元素是控件名」的辅助条件）
+  static bool _isKnownProp(String k) {
+    final key = k.toLowerCase();
+    if (int.tryParse(key) != null) return true; // 数字键 = 子节点
+    return _canonicalProps.contains(key) || _structuralKeys.contains(key);
+  }
+
   static Map<String, dynamic> normalize(dynamic raw) {
     final m = <String, dynamic>{};
     if (raw is Map) {
@@ -89,7 +144,14 @@ class Props {
     }
 
     // AndroLua 表风格：{ Widget, k = v, {child}, ... }
+    // 只有当首元素真的像控件名（已知名/已注册，或这份表带已知属性键）才当节点，
+    // 否则保持数据表原样——避免把恰好带 "1" 键的纯数据 Map 误判成控件。
     if (!m.containsKey('type') && !m.containsKey('t') && m.containsKey('1')) {
+      final probe = m['1'];
+      final probeName = typeName(probe).toLowerCase();
+      final looksNode = knownTypes.contains(probeName) ||
+          m.keys.any((k) => k != '1' && _isKnownProp(k));
+      if (!looksNode) return m;
       final type = m.remove('1');
       final numeric = <int, dynamic>{};
       for (final k in m.keys.toList()) {
@@ -212,9 +274,16 @@ class Props {
 
   static Color? toColor(dynamic v) {
     if (v == null) return null;
-    // 注意：int 按 ARGB（0xAARRGGBB）解释，不是 RGB。Lua 里写 0xFF0000 会变成不透明蓝。
-    // 想要 RGB 请用字符串 '#FF0000'。
-    if (v is int) return Color(v);
+    // int 按 ARGB（0xAARRGGBB）解释，不是 RGB：0xFFFF0000 才是红色，
+    // 0xFF0000 是 alpha=0 的**全透明红**。想写 RGB 请用字符串 '#FF0000'。
+    if (v is int) {
+      if (kDebugMode && v > 0 && v <= 0xFFFFFF) {
+        // 这种值多半是想写 RGB，但按 ARGB 解释会得到透明色——提醒一下
+        debugPrint('Props.toColor: $v 看起来是 RGB（高位没带 alpha），ARGB 解释下是透明色；'
+            '请用 "#${v.toRadixString(16).padLeft(6, '0')}" 或 0xFF${v.toRadixString(16).padLeft(6, '0')}');
+      }
+      return Color(v);
+    }
     if (v is! String) return null;
     final named = {
       'red': Colors.red, 'green': Colors.green, 'blue': Colors.blue, 'black': Colors.black,
@@ -273,9 +342,13 @@ class Props {
     return null;
   }
 
+  /// 枚举名归一：小写 + 去空格/下划线/中划线（'Top Left' / 'top_left' → 'topleft'）
+  static String _enumKey(dynamic v) =>
+      v.toString().toLowerCase().replaceAll(RegExp(r'[\s_\-]'), '');
+
   static Alignment? toAlignment(dynamic v) {
     if (v == null) return null;
-    switch (v.toString().toLowerCase()) {
+    switch (_enumKey(v)) {
       case 'center': return Alignment.center;
       case 'topleft': return Alignment.topLeft;
       case 'topright': return Alignment.topRight;
@@ -290,7 +363,7 @@ class Props {
   }
 
   static WrapAlignment toWrapAlignment(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
+    switch (v == null ? '' : _enumKey(v)) {
       case 'center': return WrapAlignment.center;
       case 'end': case 'right': return WrapAlignment.end;
       case 'spacebetween': return WrapAlignment.spaceBetween;
@@ -364,7 +437,7 @@ class Props {
   static Duration toDuration(dynamic v) => Duration(milliseconds: toNum(v)?.round() ?? 0);
 
   static Curve toCurve(dynamic v) {
-    switch (v?.toString().toLowerCase()) {
+    switch (v == null ? '' : _enumKey(v)) {
       case 'ease': return Curves.ease;
       case 'easein': return Curves.easeIn;
       case 'easeout': return Curves.easeOut;
@@ -607,9 +680,14 @@ class Props {
       backgroundColor: p.color('textBackgroundColor'),
       wordSpacing: p.n('wordSpacing'),
       letterSpacing: p.n('letterSpacing'),
-      height: p.n('lineHeight') ?? p.n('height'),
+      // 行高只认 lineHeight；height 在通用层是像素尺寸，
+      // 仅在「看着像倍数」(≤4) 时才兼容旧写法，否则忽略（写 height=100 会变成 100 倍行高）
+      height: p.n('lineHeight') ?? _lineHeightCompat(p.n('height')),
     );
   }
+
+  /// `height` 作为行高倍数的旧写法兼容：只在 (0, 4] 区间内认（像素值一律不认）
+  static double? _lineHeightCompat(double? h) => (h != null && h > 0 && h <= 4) ? h : null;
 
   static TextDecorationStyle? _decorationStyle(dynamic v) {
     switch (v?.toString().toLowerCase()) {
@@ -773,7 +851,10 @@ class Props {
   static IconData toIcon(dynamic name) {
     final key = name?.toString().toLowerCase();
     if (key == null) return Icons.widgets;
-    // 未知名：开发时用问号图标，一眼能看出是名字写错了（方块图标容易误认为故意用的）
-    return icons[key] ?? Icons.help_outline;
+    final icon = icons[key];
+    if (icon != null) return icon;
+    // 未知名：用问号图标，并在 debug 下提醒（写错名字很常见，静默降级不好排查）
+    if (kDebugMode) debugPrint('Props.toIcon: 未知图标名 "$key"，已用问号图标代替');
+    return Icons.help_outline;
   }
 }

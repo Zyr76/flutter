@@ -38,16 +38,22 @@ class Renderer {
 
   static void register(String type, Function builder) {
     custom[type.toLowerCase()] = builder;
+    // 让 Props 的「AndroLua 表风格」兜底判定也认识这个控件名
+    Props.registerType(type);
   }
 
   static Widget build(dynamic spec) {
     if (spec is String) {
       try {
-        return _build(jsonDecode(spec), '0') ?? const SizedBox.shrink();
+        final decoded = jsonDecode(spec);
+        // 整页重渲染：告知当前布局里还有哪些 id，不在里面的控制器才能回收
+        FlutterControl.markAlive(_collectIds(decoded));
+        return _build(decoded, '0') ?? const SizedBox.shrink();
       } catch (_) {
         return Text(spec);
       }
     }
+    FlutterControl.markAlive(_collectIds(spec));
     return _build(spec, '0') ?? const SizedBox.shrink();
   }
 
@@ -74,6 +80,23 @@ class Renderer {
         padding: EdgeInsets.all(4),
         child: Text('⚠ 节点嵌套过深（可能存在环）', style: TextStyle(color: Colors.red, fontSize: 11)),
       );
+
+  /// 收集 spec 里所有节点的 id（供控制器回收判断「这个 id 还在不在当前布局里」）。
+  static Set<String> _collectIds(dynamic node, [Set<String>? out]) {
+    final ids = out ?? <String>{};
+    if (node is Map) {
+      final id = node['id'];
+      if (id != null && id.toString().isNotEmpty) ids.add(id.toString());
+      for (final v in node.values) {
+        if (v is Map || v is List) _collectIds(v, ids);
+      }
+    } else if (node is List) {
+      for (final v in node) {
+        if (v is Map || v is List) _collectIds(v, ids);
+      }
+    }
+    return ids;
+  }
 
   static Widget? _build(dynamic spec, String path) {
     if (_depthOf(path) >= _maxDepth) return _tooDeep();
@@ -1620,26 +1643,10 @@ class Renderer {
 
     final count = p.i('itemCount');
     final template = p['itemTemplate'] ?? p['item'];
-    if (template != null && count != null && count > 0) {
-      final needsSubst = _hasTemplateVar(template);
-      // 模板式懒加载：按需构建；模板含 $index/$i 时才逐项替换（否则直接用原引用）。
-      return ListView.builder(
-        controller: ctrl,
-        padding: padding,
-        physics: physics,
-        shrinkWrap: shrinkWrap,
-        scrollDirection: axis,
-        reverse: reverse,
-        itemExtent: itemExtent,
-        scrollCacheExtent: cacheExtent != null ? ScrollCacheExtent.pixels(cacheExtent) : null,
-        addAutomaticKeepAlives: p.b('addAutomaticKeepAlives', true),
-        addRepaintBoundaries: p.b('addRepaintBoundaries', true),
-        keyboardDismissBehavior: keyboardDismiss,
-        itemCount: count,
-        itemBuilder: (ctx, i) =>
-            _build(needsSubst ? _subst(template, i) : template, '$path/$i') ?? const SizedBox.shrink(),
-      );
-    }
+    // 模板式懒加载：给了 item/itemTemplate + itemCount 就按需构建；
+    // 模板含 $index/$i 时才逐项替换（否则直接用原引用）。
+    final bool lazy = template != null && count != null && count > 0;
+    final needsSubst = lazy && _hasTemplateVar(template);
     return ListView.builder(
       controller: ctrl,
       padding: padding,
@@ -1652,14 +1659,24 @@ class Renderer {
       addAutomaticKeepAlives: p.b('addAutomaticKeepAlives', true),
       addRepaintBoundaries: p.b('addRepaintBoundaries', true),
       keyboardDismissBehavior: keyboardDismiss,
-      itemCount: children.length,
-      itemBuilder: (ctx, i) => children[i],
+      itemCount: lazy ? count : children.length,
+      itemBuilder: (ctx, i) => lazy
+          ? (_build(needsSubst ? _subst(template, i) : template, '$path/$i') ?? const SizedBox.shrink())
+          : children[i],
     );
   }
 
   /// 深拷贝并把字符串里的 `$index`/`$i` 替换为下标（用于模板式列表）。
   static dynamic _subst(dynamic v, int i) {
-    if (v is String) return v.replaceAll(r'$index', '$i').replaceAll(r'$i', '$i');
+    if (v is String) {
+      // `$$` 是转义的字面 `$`：先用哨兵占位，替换完再还原
+      const sentinel = '\u0000';
+      return v
+          .replaceAll(r'$$', sentinel)
+          .replaceAll(r'$index', '$i')
+          .replaceAll(r'$i', '$i')
+          .replaceAll(sentinel, r'$');
+    }
     if (v is List) return v.map((e) => _subst(e, i)).toList();
     if (v is Map) {
       final m = <String, dynamic>{};
@@ -3126,12 +3143,48 @@ class FlutterControl {
 
   static void unregisterTab(String id) => _tabs.remove(id);
 
-  /// 节点被移除时可释放控制器；当前未自动调用（避免列表回收时误释放）。
-  static void release(String id) {
+  /// 手动释放某个 id 的全部控制器。一般不用：正常由 _IdNode 的引用计数 +
+  /// 整页重建时的 markAlive 自动回收（见下）。
+  static void release(String id) => _releaseNow(id);
+
+  // ---------- 生命周期：引用计数 + 整页重建时回收 ----------
+  // 这些控制器是「按 id 复用」的（同一 id 重渲染要复用，否则滚动位置/输入内容全丢），
+  // 所以不能在控件 dispose 时直接释放（列表回收、切标签页都会 dispose）。
+  // 策略：节点挂载 retain、卸载 unmount；整页重建后 markAlive 告知当前布局里还有哪些 id，
+  // 只有「引用归零 且 已不在布局里」的才真正释放。
+  static final Map<String, int> _refs = {};
+  static Set<String> _alive = const {};
+
+  /// 节点挂载（_IdNode 调用）。
+  static void retain(String id) => _refs[id] = (_refs[id] ?? 0) + 1;
+
+  /// 节点卸载（_IdNode 调用）。
+  static void unmount(String id) {
+    final n = (_refs[id] ?? 1) - 1;
+    _refs[id] = n < 0 ? 0 : n;
+    _sweep();
+  }
+
+  /// 整页重建后告知当前 spec 里还有哪些 id。
+  static void markAlive(Set<String> ids) {
+    _alive = ids;
+    _sweep();
+  }
+
+  static void _sweep() {
+    for (final id in _refs.keys.toList()) {
+      if ((_refs[id] ?? 0) <= 0 && !_alive.contains(id)) _releaseNow(id);
+    }
+  }
+
+  static void _releaseNow(String id) {
+    _refs.remove(id);
     _scrolls.remove(id)?.dispose();
     _pages.remove(id)?.dispose();
     _texts.remove(id)?.dispose();
     _focusNodes.remove(id)?.dispose();
+    _refreshKeys.remove(id);
+    _tabs.remove(id);
   }
 
   static Future<Map<String, dynamic>> call(Map<String, dynamic>? a) async {
@@ -3627,6 +3680,13 @@ class _IdNodeState extends State<_IdNode> {
   void initState() {
     super.initState();
     _notifier.value = widget.spec;
+    FlutterControl.retain(widget.id);
+  }
+
+  @override
+  void dispose() {
+    FlutterControl.unmount(widget.id);
+    super.dispose();
   }
 
   @override
