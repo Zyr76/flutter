@@ -1702,8 +1702,9 @@ class Renderer {
 
   static Widget _mapView(Props p) {
     final cp = Props.of(p['center']);
-    final lat = cp.n('lat') ?? cp.n('latitude') ?? 39.9042;
-    final lng = cp.n('lng') ?? cp.n('longitude') ?? 116.4074;
+    // 中心点：center = { lat=, lng= } 优先，也接受直接写 lat/lng
+    final lat = cp.n('lat') ?? cp.n('latitude') ?? p.n('lat') ?? p.n('latitude') ?? 39.9042;
+    final lng = cp.n('lng') ?? cp.n('longitude') ?? p.n('lng') ?? p.n('longitude') ?? 116.4074;
     final markers = <Marker>[];
     for (final m in p.list('markers')) {
       final mp = Props.of(m);
@@ -1767,6 +1768,10 @@ class Renderer {
       children: [
         TileLayer(
           urlTemplate: tile,
+          // subdomains = { "1", "2", "3", "4" } 之类；不写就用 flutter_map 默认（a/b/c）
+          subdomains: p.list('subdomains').isEmpty
+              ? null
+              : p.list('subdomains').map((e) => e.toString()).toList(),
           userAgentPackageName: p.s('userAgent') ?? 'com.androlua',
         ),
         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
