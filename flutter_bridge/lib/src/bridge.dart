@@ -92,6 +92,34 @@ class FlutterBridge {
     };
   }
 
+  /// 命令式弹窗的 spec 容错：
+  ///  * 没写 type（如 `flutterShowDialog{ title=..., { Text,... } }`）→ 当 AlertDialog，
+  ///    数字键的子节点合并到 content；
+  ///  * 只给了一个内容节点（如 `flutterShowBottomSheet{ { Padding, ... } }`）→ 直接用那个节点。
+  static dynamic _dialogSpec(dynamic spec, {String type = 'AlertDialog'}) {
+    if (spec is! Map) return spec;
+    final m = spec.cast<String, dynamic>();
+    if ((m['type'] ?? m['t']) != null) return m;
+    if (m.length == 1 && (m['1'] ?? m[1]) is Map) return m['1'] ?? m[1];
+    final kids = <dynamic>[];
+    final rest = <String, dynamic>{};
+    m.forEach((k, v) {
+      if (int.tryParse(k) != null) {
+        kids.add(v);
+      } else {
+        rest[k] = v;
+      }
+    });
+    if (type != 'AlertDialog') {
+      return <String, dynamic>{'type': type, ...rest, if (kids.isNotEmpty) 'children': kids};
+    }
+    final out = <String, dynamic>{'type': type, ...rest};
+    if (kids.isNotEmpty) {
+      out['content'] = kids.length == 1 ? kids.first : <String, dynamic>{'type': 'Column', 'children': kids};
+    }
+    return out;
+  }
+
   /// 向原生视频播放器发指令。
   void video(String method, [dynamic args]) {
     videoChannel.invokeMethod<void>(method, args);
@@ -124,7 +152,7 @@ class FlutterBridge {
           await showDialog<dynamic>(
             context: ctx,
             barrierDismissible: true,
-            builder: (_) => Renderer.build(decodeSpec(call.arguments)),
+            builder: (_) => Renderer.build(_dialogSpec(decodeSpec(call.arguments))),
           );
           emit('dialogClosed');
           return null;
@@ -135,7 +163,7 @@ class FlutterBridge {
           if (ctx == null) return null;
           await showModalBottomSheet<dynamic>(
             context: ctx,
-            builder: (_) => Renderer.build(decodeSpec(call.arguments)),
+            builder: (_) => Renderer.build(_dialogSpec(decodeSpec(call.arguments), type: 'Column')),
           );
           emit('bottomSheetClosed');
           return null;

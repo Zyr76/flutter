@@ -187,10 +187,10 @@ DEMOS[#DEMOS + 1] = { "布局与容器", "Column/Row/Stack/Wrap/Container/Positi
         { Chip, text = "Wrap 1" }, { Chip, text = "Wrap 2" }, { Chip, text = "Wrap 3" },
         { Chip, text = "Wrap 4" }, { Chip, text = "Wrap 5" } },
       { Text, text = "尺寸/比例/裁剪", fontSize = 12, color = "#888888" },
-      { Row, gap = 8,
-        { AspectRatio, aspectRatio = 1.5, { Container, color = "#ffcc80" } },
-        { FractionallySizedBox, widthFactor = 0.3, heightFactor = 0.5,
-          { Container, color = "#a5d6a7", { Center, { Text, text = "Fractionally" } } } } },
+      { Row, gap = 8, height = 60,
+        { Expanded, { AspectRatio, aspectRatio = 1.5, { Container, color = "#ffcc80" } } },
+        { Expanded, { FractionallySizedBox, widthFactor = 0.8, heightFactor = 1, alignment = "center",
+          { Container, color = "#a5d6a7", { Center, { Text, text = "Fractionally" } } } } } },
       { Row, gap = 8,
         { ClipRRect, radius = 10, { Container, width = 60, height = 40, color = "#ef9a9a" } },
         { ClipOval, { Container, width = 40, height = 40, color = "#90caf9" } },
@@ -349,12 +349,12 @@ DEMOS[#DEMOS + 1] = { "输入与表单", "TextField/Form/SearchBar/日期时间�
       { Text, id = "inputEcho", text = "（输入回显）", fontSize = 12, color = "#3949ab" },
       { Text, text = "SearchBar / 日期选择", fontSize = 12, color = "#888888" },
       { SearchBar, id = "sb2", hint = "搜索点什么…", onChange = "搜索回显" },
-      { CalendarDatePicker, initialDate = "2026-10-02", firstDate = "2020-01-01", lastDate = "2030-12-31", onChange = "日期回显" },
+      { SizedBox, height = 320, { CalendarDatePicker, initialDate = "2026-10-02", firstDate = "2020-01-01", lastDate = "2030-12-31", onChange = "日期回显" } },
       { Row, gap = 8,
         { OutlinedButton, text = "命令式：日期对话框", onClick = "弹日期" },
         { OutlinedButton, text = "命令式：时间对话框", onClick = "弹时间" } },
-      { CupertinoDatePicker, mode = "date", onChange = "日期回显" },
-      { CupertinoTimerPicker, mode = "hms", onChange = "时间回显" } },
+      { SizedBox, height = 200, { CupertinoDatePicker, mode = "date", onChange = "日期回显" } },
+      { SizedBox, height = 200, { CupertinoTimerPicker, mode = "hms", onChange = "时间回显" } } },
   })
 end }
 
@@ -536,8 +536,8 @@ DEMOS[#DEMOS + 1] = { "弹窗", "AlertDialog/SimpleDialog/Dialog/BottomSheet/Cup
       { Dialog, { Padding, padding = 20, { Column, gap = 10,
           { Text, text = "Dialog 自定义内容" },
           { TextField, label = "弹窗里的输入框" } } } },
-      { BottomSheet, showDragHandle = true, elevation = 8, onClosing = "弹窗关闭",
-        { Padding, padding = 16, { Text, text = "BottomSheet（声明式，带拖拽手柄）" } } },
+      { SizedBox, height = 150, { BottomSheet, showDragHandle = true, elevation = 8, onClosing = "弹窗关闭",
+        { Padding, padding = 16, { Text, text = "BottomSheet（声明式，带拖拽手柄）" } } } },
       { CupertinoAlertDialog, title = { Text, text = "CupertinoAlertDialog" },
         content = { Text, text = "iOS 风格弹窗" },
         actions = { { CupertinoButton, text = "好" } } } },
@@ -545,6 +545,7 @@ DEMOS[#DEMOS + 1] = { "弹窗", "AlertDialog/SimpleDialog/Dialog/BottomSheet/Cup
 end }
 
 -- 10) 动画 ------------------------------------------------------
+local 动画页 = #DEMOS + 1
 DEMOS[#DEMOS + 1] = { "动画", "Animated* 全家桶（duration + curve）", function()
   return shell("动画", {
     SingleChildScrollView, padding = 12,
@@ -706,9 +707,18 @@ function 双击了() 回显("双击了") end
 
 -- 命令式操作
 function 弹提示() flutterShowSnackBar("这是一条命令式提示") end
-function 弹对话框() flutterShowDialog{ title = "命令式对话框", { Text, text = "内容由 Lua 传进来" },
-  actions = { { TextButton, text = "知道了" } } } end
-function 弹底部弹窗() flutterShowBottomSheet{ { Padding, padding = 20, { Text, text = "命令式底部弹窗" } } } end
+function 弹对话框()
+  flutterShowDialog{ AlertDialog, radius = 14,
+    title = { Text, text = "命令式对话框" },
+    content = { Text, text = "内容由 Lua 传进来（没写 type 也能弹，引擎会容错当 AlertDialog）" },
+    actions = { { TextButton, text = "知道了" } } }
+end
+function 弹底部弹窗()
+  flutterShowBottomSheet{ Padding, padding = 20,
+    { Column, gap = 8,
+      { Text, text = "命令式底部弹窗" },
+      { Text, text = "内容同样来自 Lua", fontSize = 12, color = "#888888" } } }
+end
 function 弹日期() flutterDatePicker{ onChange = "日期回显" } end
 function 弹时间() flutterTimePicker{ onChange = "时间回显" } end
 
@@ -759,7 +769,7 @@ function 切动画()
   动画左 = 开 and 120 or 10
   动画宽 = 开 and 150 or 90
   动画交叉 = 开 and "second" or "first"
-  render(DEMOS[#DEMOS - 1][3]())  -- 倒数第二个是动画页（该页无额外绑定）
+  render(DEMOS[动画页][3]())  -- 重渲染动画页自身（切状态后触发过渡）
 end
 
 -- ============================================================
