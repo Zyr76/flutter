@@ -3362,8 +3362,12 @@ class BridgeTabs extends StatefulWidget {
   State<BridgeTabs> createState() => _BridgeTabsState();
 }
 
-/// 包一层 DefaultTabController，但切页时复用同一个 controller 做 animateTo。
-/// 以前把 index 编进 key（重建控制器）会让指示器瞬移，没有过渡动画。
+/// 包一层 DefaultTabController，但切页复用同一个 controller（animateTo → 指示器有过渡动画）。
+///
+/// index 属性是**声明式**的：spec 里写 index=n，重建后就应该停在第 n 页。
+/// 控制器是活对象（用户手滑/点标签都会改它自己），所以每次重建都按属性纠偏——
+/// 否则「同一个值再赋一次」在 Dart 侧看不出变化（属性没变、控制器却已经不在那页），
+/// 表现为「第二次点跳转没反应」。Lua 侧用 onChange 记住当前页即可。
 class _BridgeTabsState extends State<BridgeTabs> {
   BuildContext? _inner;
   TabController? _controller;
@@ -3374,6 +3378,7 @@ class _BridgeTabsState extends State<BridgeTabs> {
         initialIndex: widget.index,
         child: Builder(builder: (ctx) {
           _bind(ctx);
+          _syncToIndex(widget.index);
           return widget.child;
         }),
       );
@@ -3389,22 +3394,24 @@ class _BridgeTabsState extends State<BridgeTabs> {
     if (id != null) FlutterControl.registerTab(id, c);
   }
 
+  /// 属性说停在哪页就停在哪页（重建时纠偏，动画交给 controller）。
+  void _syncToIndex(int index) {
+    final c = _controller;
+    if (c == null || c.index == index || c.indexIsChanging) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _inner;
+      if (!mounted || ctx == null) return;
+      final live = DefaultTabController.maybeOf(ctx);
+      if (live == null || live.index == index || live.indexIsChanging) return;
+      live.animateTo(index);
+    });
+  }
+
   /// indexIsChanging 期间是动画中，落地后再通知，避免 Lua 收到一堆中间值。
   void _onSettled() {
     final c = _controller;
     if (c == null || c.indexIsChanging) return;
     widget.onChanged?.call(c.index);
-  }
-
-  @override
-  void didUpdateWidget(BridgeTabs old) {
-    super.didUpdateWidget(old);
-    if (widget.index == old.index) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _inner;
-      if (!mounted || ctx == null) return;
-      DefaultTabController.maybeOf(ctx)?.animateTo(widget.index);
-    });
   }
 
   @override
