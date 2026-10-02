@@ -83,8 +83,17 @@ add_library(xml SHARED
 
 
 
+# yyjson：高性能 JSON 库（yyjson.c 为官方 amalgamation，MIT；lua_yyjson.c 是本项目的绑定）
+add_library(yyjson SHARED
+    yyjson/lua_yyjson.c
+    yyjson/yyjson.c
+
+    ${LUA_SOURCES}
+)
+
+
 # 链接系统库
-target_link_libraries(luajava bson cjson canvas crypt md5 xml socket
+target_link_libraries(luajava bson cjson canvas crypt md5 xml socket yyjson
     android
     log
     
