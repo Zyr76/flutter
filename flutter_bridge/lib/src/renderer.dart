@@ -1793,7 +1793,29 @@ class Renderer {
 
   static Widget _chart(Props p) {
     final height = p.n('height');
-    final series = p.list('series').map(_Series.of).toList();
+    var series = p.list('series').map(_Series.of).toList();
+    // 宽容：没写 series、只给了顶层 values/colors 时自动合成为 series
+    // （折线图 → 一条线；柱/饼 → 一值一段）
+    if (series.isEmpty) {
+      final vals = p.list('values');
+      final cols = p.list('colors');
+      if (vals.isNotEmpty) {
+        Color col(int i) => cols.isEmpty
+            ? Colors.blue
+            : (Props.toColor(cols[i % cols.length]) ?? Colors.blue);
+        if (p.type == 'linechart') {
+          final spots = <FlSpot>[
+            for (var i = 0; i < vals.length; i++) FlSpot(i.toDouble(), Props.toNum(vals[i]) ?? 0),
+          ];
+          series = [_Series(p.s('name') ?? p.s('text'), col(0), spots.last.y, spots)];
+        } else {
+          series = [
+            for (var i = 0; i < vals.length; i++)
+              _Series(null, col(i), Props.toNum(vals[i]) ?? 0, const []),
+          ];
+        }
+      }
+    }
     final kind = p.type;
 
     Widget body;
@@ -2633,7 +2655,9 @@ class _Series {
 
   static _Series of(dynamic raw) {
     final p = Props.of(raw);
-    final points = p.list('points');
+    // points 是规范键；values 是宽容别名（很多人会写 values）
+    var points = p.list('points');
+    if (points.isEmpty) points = p.list('values');
     final spots = <FlSpot>[];
     if (points.isNotEmpty) {
       for (var i = 0; i < points.length; i++) {
@@ -2647,7 +2671,7 @@ class _Series {
       }
     }
     return _Series(
-      p.s('name') ?? p.s('label'),
+      p.s('name') ?? p.s('label') ?? p.s('text'),
       p.color('color') ?? Colors.blue,
       p.n('value') ?? (spots.isNotEmpty ? spots.last.y : 1),
       spots,
