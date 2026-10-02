@@ -365,8 +365,8 @@ DEMOS[#DEMOS + 1] = { "列表与滚动", "ListView/GridView/PageView/Reorderable
     { Column, gap = 10,
       { Text, text = "ListView：静态子项 / 模板懒加载（itemCount+itemTemplate）", fontSize = 12, color = "#888888" },
       { Container, height = 150, { ListView, id = "lv2", padding = 6,
-          { ListTile, title = { Text, text = "静态项 1" }, subtitle = { Text, text = "直接写子节点" } },
-          { ListTile, title = { Text, text = "静态项 2" } } } },
+          { ListTile, onClick = "列表项点击", title = { Text, text = "静态项 1" }, subtitle = { Text, text = "点我行有回显" } },
+          { ListTile, onClick = "列表项点击", title = { Text, text = "静态项 2" } } } },
       { Container, height = 150, { ListView, itemCount = 200, gap = 0,
           itemTemplate = { Card, { ListTile, title = { Text, text = "模板项 $index" },
             subtitle = { Text, text = "两万个也能滚得动" } } } } },
@@ -419,8 +419,20 @@ DEMOS[#DEMOS + 1] = { "列表与滚动", "ListView/GridView/PageView/Reorderable
       { Card, { ExpansionTile, title = { Text, text = "ExpansionTile（可展开/收起，声明式）" },
           expanded = true, initiallyExpanded = true, iconColor = "#1565c0",
           { Padding, padding = 12, { Text, text = "展开后的内容（tile.dart.Expanded = true/false 控制）" } } } },
+      { Text, text = "每行独立回调：给模板行写 id = \"row$index\"，渲染后用句柄绑定（见下方 5 行）", fontSize = 12, color = "#888888" },
+      { Container, height = 170, { ListView, itemCount = 5, gap = 0,
+          itemTemplate = { Card, id = "row$index", margin = 4,
+            { ListTile, title = { Text, text = "独立行 $index" },
+              subtitle = { Text, text = "点我先看回显——每行回调不同" } } } } },
       { Text, id = "listEcho", text = "（列表交互回显）", fontSize = 12, color = "#3949ab" } },
   })
+end, function()
+  for i = 0, 4 do
+    local h = _G["row" .. i]
+    if h then
+      h.onClick = function() 回显("点了第 " .. (i + 1) .. " 行（每行回调不同）") end
+    end
+  end
 end }
 
 -- 7) 导航与框架 -------------------------------------------------
@@ -602,13 +614,25 @@ DEMOS[#DEMOS + 1] = { "媒体与图表", "Video/Audio/二维码/地图/图表/�
 end }
 
 -- 12) 属性速查 ---------------------------------------------------
-DEMOS[#DEMOS + 1] = { "属性速查", "116 个控件各自支持哪些属性（带搜索）", function()
+DEMOS[#DEMOS + 1] = { "属性速查", "116 个控件各自支持哪些属性（带搜索，点行复制）", function()
   return shell("属性速查（搜索控件名或属性名）", {
     Column, padding = 10,
     { SearchBar, id = "sb3", hint = "如：noSplash / TabBar / slider", onChange = "速查搜索" },
     { SizedBox, height = 8 },
     { Expanded, { ListView, table.unpack(速查行()) } },
   })
+end, function()
+  for i, e in ipairs(属性表) do
+    local h = _G["props" .. i]
+    if h then
+      h.onClick = function()
+        local ok, err = pcall(function()
+          activity.getSystemService(activity.CLIPBOARD_SERVICE).setText(e[1] .. "：" .. e[2])
+        end)
+        flutterShowSnackBar(ok and ("已复制 " .. e[1] .. " 的属性") or ("复制失败：" .. tostring(err)))
+      end
+    end
+  end
 end }
 
 -- ============================================================
@@ -620,9 +644,9 @@ local 页名 = ""
 function 速查行()
   local 行 = {}
   local 词 = 速查词:lower()
-  for _, e in ipairs(属性表) do
+  for i, e in ipairs(属性表) do
     if 词 == "" or e[1]:lower():find(词, 1, true) or e[2]:lower():find(词, 1, true) then
-      行[#行 + 1] = { Card, margin = 4,
+      行[#行 + 1] = { Card, margin = 4, id = "props" .. i,
         { ListTile,
           title = { Text, text = e[1], fontSize = 14, fontWeight = "bold" },
           subtitle = { Text, text = e[2], fontSize = 11, color = "#666666" } } }
@@ -634,7 +658,7 @@ function 速查行()
   return 行
 end
 
-local function 回显(文本)
+function 回显(文本)
   local 映射 = { ["选择控件"] = "choiceEcho", ["输入与表单"] = "inputEcho",
                  ["列表与滚动"] = "listEcho", ["媒体与图表"] = "mediaEcho" }
   local id = 映射[页名]
@@ -645,8 +669,19 @@ end
 
 function 速查搜索(e)
   速查词 = tostring(e.value or "")
-  render(DEMOS[#DEMOS][3]())
+  渲染页(#DEMOS)
 end
+
+-- 页渲染 + 可选的句柄绑定（DEMOS[i][4]）
+function 渲染页(i)
+  if not DEMOS[i] then return end
+  页名 = DEMOS[i][1]
+  render(DEMOS[i][3]())
+  local bind = DEMOS[i][4]
+  if bind then bind() end
+end
+
+function 列表项点击() 回显("点到了列表项") end
 
 function btnTap() 回显("按钮被点了）") end
 function 菜单选择(e) 回显("菜单选择：" .. tostring(e.value)) end
@@ -724,7 +759,7 @@ function 切动画()
   动画左 = 开 and 120 or 10
   动画宽 = 开 and 150 or 90
   动画交叉 = 开 and "second" or "first"
-  render(DEMOS[#DEMOS - 1][3]())  -- 倒数第二个是动画页
+  render(DEMOS[#DEMOS - 1][3]())  -- 倒数第二个是动画页（该页无额外绑定）
 end
 
 -- ============================================================
@@ -735,8 +770,7 @@ render = function(spec)
 end
 
 local function openDemo(i)
-  页名 = DEMOS[i][1]
-  render(DEMOS[i][3]())
+  渲染页(i)
 end
 
 local menuRows

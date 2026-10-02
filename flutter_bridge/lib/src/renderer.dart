@@ -1958,7 +1958,9 @@ class Renderer {
     // 通用点击：控件自身不处理 onTap/onClick 时（如 Card / Container / Text / Row），
     // 这里统一包一层 GestureDetector——否则「给卡片写了 onClick 却没反应」很迷惑。
     if (!_noTapWrap.contains(p.type)) {
-      final cb = _voidCallback(p['onTap'], fallback: p.map);
+      // 用 _tapHandler：既支持 onClick="函数名"，也支持「只给 id、事后用句柄绑 onClick」
+      // （原来用 _voidCallback(p['onTap'])，只给 id 时返回 null，卡片/容器点了没反应）
+      final cb = _tapHandler(p);
       final lp = _voidCallback(p['onLongPress'] ?? p['onLongClick'], fallback: p.map);
       if (cb != null || lp != null) out = GestureDetector(onTap: cb, onLongPress: lp, child: out);
     }
