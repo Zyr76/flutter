@@ -613,6 +613,12 @@ class Renderer {
           resizeToAvoidBottomInset: p.has('resizeToAvoidBottomInset') ? p.b('resizeToAvoidBottomInset', true) : null,
           drawerEnableOpenDragGesture: p.b('drawerEnableOpenDragGesture', true),
           endDrawerEnableOpenDragGesture: p.b('endDrawerEnableOpenDragGesture', true),
+          drawerScrimColor: p.color('drawerScrimColor'),
+          drawerEdgeDragWidth: p.n('drawerEdgeDragWidth'),
+          primary: p.has('primary') ? p.b('primary') : null,
+          persistentFooterAlignment: p.align('persistentFooterAlignment') is Alignment
+              ? (p.align('persistentFooterAlignment') as Alignment)
+              : null,
         );
         break;
       case 'appbar':
@@ -848,15 +854,14 @@ class Renderer {
         );
         break;
       case 'expansiontile':
-        final expId = p['id']?.toString();
-        final expOpen = p.b('expanded') || p.b('initiallyExpanded');
-        // 带 id 时把展开态编进 key：Lua 侧 `tile.dart.Expanded = true/false` 即可展开/收起
-        result = ExpansionTile(
-          key: expId != null ? ValueKey('exp:$expId:$expOpen') : null,
+        result = BridgeExpansionTile(
+          key: _nodeKey(p, path),
+          p: p,
           title: _slotText(p['title'] ?? p['text'], '$path/title') ?? const SizedBox.shrink(),
           subtitle: _slotText(p['subtitle'], '$path/subtitle'),
-          initiallyExpanded: expOpen,
+          leading: _slotText(p['leading'], '$path/leading'),
           children: children,
+          onChanged: (v) => _emit(p['onChange'] ?? p['onExpansionChanged'], v, fallback: p.map, type: 'expansion'),
         );
         break;
       case 'stepper':
@@ -886,6 +891,19 @@ class Renderer {
           result = const SizedBox.shrink();
         } else {
           result = DataTable(
+            columnSpacing: p.n('columnSpacing'),
+            horizontalMargin: p.n('horizontalMargin'),
+            headingRowHeight: p.n('headingRowHeight'),
+            dataRowMinHeight: p.n('dataRowMinHeight'),
+            dataRowMaxHeight: p.n('dataRowMaxHeight'),
+            dividerThickness: p.n('dividerThickness'),
+            headingRowColor: Renderer._colorState(p, 'headingRowColor'),
+            dataRowColor: Renderer._colorState(p, 'dataRowColor'),
+            headingTextStyle: _textStyleOrNull(p['headingTextStyle']),
+            dataTextStyle: _textStyleOrNull(p['dataTextStyle']),
+            showBottomBorder: p.b('showBottomBorder'),
+            showCheckboxColumn: p.b('showCheckboxColumn', true),
+            clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
             columns: [
               for (var i = 0; i < columns.length; i++)
                 DataColumn(label: _dataCell(columns[i], '$path/col$i')),
@@ -1452,6 +1470,10 @@ class Renderer {
           shape: Props.toShape(p.s('shape'), p.n('radius')),
           enableDrag: p.b('enableDrag', true),
           showDragHandle: p.b('showDragHandle'),
+          dragHandleColor: p.color('dragHandleColor'),
+          dragHandleSize: _size(p['dragHandleSize']),
+          shadowColor: p.color('shadowColor'),
+          clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
           builder: (ctx) => child0(),
         );
         break;
@@ -1921,6 +1943,10 @@ class Renderer {
       final lp = _voidCallback(p['onLongPress'] ?? p['onLongClick'], fallback: p.map);
       if (cb != null || lp != null) out = GestureDetector(onTap: cb, onLongPress: lp, child: out);
     }
+    // 通用交互事件层：写了的才包，不影响现有手势竞争
+    if (_hasInteraction(p)) {
+      out = _interactionLayerWidget(out, p);
+    }
     final w = p['width'];
     final h = p['height'];
     if (w != null || h != null) {
@@ -1974,6 +2000,100 @@ class Renderer {
     if (s == false) return true;
     final t = s?.toString().toLowerCase();
     return t == 'none' || t == 'off' || t == 'false';
+  }
+
+  /// 通用交互事件：写了下面任意一个，就给该节点包一层手势/鼠标/焦点处理。
+  static bool _hasInteraction(Props p) =>
+      p.has('onTapDown') ||
+      p.has('onTapUp') ||
+      p.has('onTapCancel') ||
+      p.has('onDoubleTap') ||
+      p.has('onSecondaryTap') ||
+      p.has('onHover') ||
+      p.has('onEnter') ||
+      p.has('onExit') ||
+      p.has('cursor') ||
+      p.has('mouseCursor') ||
+      p.has('onFocusChange') ||
+      p.has('autofocus');
+
+  static MouseCursor? _cursor(dynamic v) {
+    switch (v?.toString().toLowerCase()) {
+      case 'click':
+      case 'pointer':
+        return SystemMouseCursors.click;
+      case 'basic':
+        return SystemMouseCursors.basic;
+      case 'text':
+        return SystemMouseCursors.text;
+      case 'forbidden':
+        return SystemMouseCursors.forbidden;
+      case 'grab':
+        return SystemMouseCursors.grab;
+      case 'grabbing':
+        return SystemMouseCursors.grabbing;
+      case 'help':
+        return SystemMouseCursors.help;
+      case 'move':
+        return SystemMouseCursors.move;
+      case 'none':
+        return MouseCursor.defer;
+    }
+    return null;
+  }
+
+  /// 通用交互事件层（对任意控件可用）：
+  ///  * 手势：`onTapDown/onTapUp/onTapCancel/onDoubleTap/onSecondaryTap`
+  ///  * 鼠标：`onHover/onEnter/onExit/cursor`（cursor 取 click/pointer/text/forbidden/grab…）
+  ///  * 焦点：`onFocusChange/autofocus`
+  /// 事件名是字符串就调同名 Lua 函数；取位置的事件会带上 x/y。
+  static Widget _interactionLayerWidget(Widget child, Props p) {
+    Widget out = child;
+    final down = p['onTapDown'];
+    final up = p['onTapUp'];
+    final cancel = p['onTapCancel'];
+    final dbl = p['onDoubleTap'];
+    final sec = p['onSecondaryTap'];
+    if (down != null || up != null || cancel != null || dbl != null || sec != null) {
+      out = GestureDetector(
+        onTapDown: down == null
+            ? null
+            : (d) => _emit(down, {'x': d.globalPosition.dx, 'y': d.globalPosition.dy}, fallback: p.map, type: 'tapDown'),
+        onTapUp: up == null
+            ? null
+            : (d) => _emit(up, {'x': d.globalPosition.dx, 'y': d.globalPosition.dy}, fallback: p.map, type: 'tapUp'),
+        onTapCancel: cancel == null ? null : () => _emit(cancel, null, fallback: p.map, type: 'tapCancel'),
+        onDoubleTap: dbl == null ? null : () => _emit(dbl, null, fallback: p.map, type: 'doubleTap'),
+        onSecondaryTap: sec == null ? null : () => _emit(sec, null, fallback: p.map, type: 'secondaryTap'),
+        child: out,
+      );
+    }
+    final cursor = _cursor(p['cursor'] ?? p['mouseCursor']);
+    final onHover = p['onHover'];
+    final onEnter = p['onEnter']; 
+    final onExit = p['onExit'];
+    if (cursor != null || onHover != null || onEnter != null || onExit != null) {
+      out = MouseRegion(
+        cursor: cursor ?? MouseCursor.defer,
+        onHover: onHover == null
+            ? null
+            : (e) => _emit(onHover, {'x': e.localPosition.dx, 'y': e.localPosition.dy}, fallback: p.map, type: 'hover'),
+        onEnter: onEnter == null ? null : (e) => _emit(onEnter, null, fallback: p.map, type: 'enter'),
+        onExit: onExit == null ? null : (e) => _emit(onExit, null, fallback: p.map, type: 'exit'),
+        child: out,
+      );
+    }
+    final onFocusChange = p['onFocusChange'];
+    if (onFocusChange != null || p.has('autofocus')) {
+      out = Focus(
+        autofocus: p.b('autofocus'),
+        onFocusChange: onFocusChange == null
+            ? null
+            : (has) => _emit(onFocusChange, has, fallback: p.map, type: 'focusChange'),
+        child: out,
+      );
+    }
+    return out;
   }
 
   static bool _hasThemePatch(Props p) =>
@@ -2168,6 +2288,33 @@ class Renderer {
   /// 默认圆角不一致是 Flutter 自己的默认行为，不是笔误：
   /// UnderlineInputBorder 默认只在上方两个角倒 4（topLeft/topRight），
   /// OutlineInputBorder 默认四角都倒 4；传 radius 时两者都按传入值走。
+  /// 输入过滤预设：formatter = "digits" / "number" / "phone" / "none"（也接受列表）  /// 嵌套的 { fontSize=, color=, fontWeight= … } 转 TextStyle
+  static TextStyle? _textStyleOrNull(dynamic v) =>
+      v is Map ? Props.toTextStyle(Props.of(v)) : null;
+
+  static List<TextInputFormatter>? _textFormatters(Props p) {
+    final v = p['formatter'] ?? p['inputFormatter'] ?? p['inputFormatters'];
+    if (v == null) return null;
+    final items = v is List ? v : <dynamic>[v];
+    final out = <TextInputFormatter>[];
+    for (final f in items) {
+      switch (f.toString().toLowerCase()) {
+        case 'digits':
+        case 'numberonly':
+          out.add(FilteringTextInputFormatter.digitsOnly);
+          break;
+        case 'number':
+        case 'decimal':
+          out.add(FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]')));
+          break;
+        case 'phone':
+          out.add(FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-() ]')));
+          break;
+      }
+    }
+    return out.isEmpty ? null : out;
+  }
+
   static InputBorder? _inputBorder(Props p, String key) {
     final v = p[key];
     if (v == null) return null;
@@ -2716,6 +2863,9 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
         floatingLabelBehavior: Renderer._floatingLabel(p.s('floatingLabelBehavior')),
         alignLabelWithHint: p.has('alignLabelWithHint') ? p.b('alignLabelWithHint') : null,
         isDense: p.has('isDense') ? p.b('isDense') : null,
+        hintMaxLines: p.i('hintMaxLines'),
+        errorMaxLines: p.i('errorMaxLines'),
+        helperMaxLines: p.i('helperMaxLines'),
       ),
       keyboardType: Props.toKeyboardType(p['keyboardType'] ?? p['inputType']),
       textInputAction: Props.toInputAction(p['textInputAction']),
@@ -2738,6 +2888,31 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
       enabled: p.b('enabled', true),
       enableInteractiveSelection:
           p.has('enableInteractiveSelection') ? p.b('enableInteractiveSelection', true) : null,
+      autofillHints: p.list('autofillHints')?.map((e) => e.toString()).toList(),
+      keyboardAppearance: switch (p.s('keyboardAppearance')?.toLowerCase()) {
+        'dark' => Brightness.dark,
+        'light' => Brightness.light,
+        _ => null,
+      },
+      textAlignVertical: switch (p.s('textAlignVertical')?.toLowerCase()) {
+        'top' => TextAlignVertical.top,
+        'bottom' => TextAlignVertical.bottom,
+        'center' => TextAlignVertical.center,
+        _ => null,
+      },
+      expands: p.has('expands') ? p.b('expands') : null,
+      maxLengthEnforcement: switch (p.s('maxLengthEnforcement')?.toLowerCase()) {
+        'enforced' => MaxLengthEnforcement.enforced,
+        'truncate' || 'truncateaftercompositionends' => MaxLengthEnforcement.truncateAfterCompositionEnds,
+        'none' => MaxLengthEnforcement.none,
+        _ => null,
+      },
+      inputFormatters: Renderer._textFormatters(p),
+      cursorErrorColor: p.color('cursorErrorColor'),
+      scrollPadding: p.inset('scrollPadding'),
+      canRequestFocus: p.has('canRequestFocus') ? p.b('canRequestFocus') : null,
+      dragStartBehavior: p.s('dragStartBehavior')?.toLowerCase() == 'start' ? DragStartBehavior.start : null,
+      clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : null,
       onChanged: widget.onChanged,
       onSubmitted: widget.onSubmitted,
     );
@@ -3509,6 +3684,86 @@ class _InteractTheme extends StatelessWidget {
         materialTapTargetSize: tapTarget,
       ),
       child: child,
+    );
+  }
+}
+
+/// ExpansionTile 的壳：展开态是声明式的（spec 里 expanded 变了就展开/收起），
+/// 不再把状态编进 key——那样「重复赋同一个值」不生效。
+class BridgeExpansionTile extends StatefulWidget {
+  const BridgeExpansionTile({
+    super.key,
+    required this.p,
+    required this.title,
+    required this.children,
+    this.subtitle,
+    this.leading,
+    this.onChanged,
+  });
+  final Props p;
+  final Widget title;
+  final Widget? subtitle;
+  final Widget? leading;
+  final List<Widget> children;
+  final ValueChanged<bool>? onChanged;
+  @override
+  State<BridgeExpansionTile> createState() => _BridgeExpansionTileState();
+}
+
+class _BridgeExpansionTileState extends State<BridgeExpansionTile> {
+  final ExpansionTileController _controller = ExpansionTileController();
+  late bool _open = widget.p.b('expanded') || widget.p.b('initiallyExpanded');
+  bool _inited = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    final want = p.b('expanded') || p.b('initiallyExpanded');
+    if (_inited && want != _open) {
+      _open = want;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (want) {
+          _controller.expand();
+        } else {
+          _controller.collapse();
+        }
+      });
+    }
+    _inited = true;
+    return ExpansionTile(
+      controller: _controller,
+      title: widget.title,
+      subtitle: widget.subtitle,
+      leading: widget.leading,
+      initiallyExpanded: _open,
+      backgroundColor: p.color('backgroundColor'),
+      collapsedBackgroundColor: p.color('collapsedBackgroundColor'),
+      iconColor: p.color('iconColor'),
+      collapsedIconColor: p.color('collapsedIconColor'),
+      textColor: p.color('textColor'),
+      collapsedTextColor: p.color('collapsedTextColor'),
+      tilePadding: p.inset('tilePadding'),
+      childrenPadding: p.inset('childrenPadding'),
+      shape: Props.toShape(p.s('shape'), p.n('radius')),
+      collapsedShape: Props.toShape(p.s('collapsedShape'), p.n('collapsedRadius')),
+      dense: p.has('dense') ? p.b('dense') : null,
+      enabled: p.b('enabled', true),
+      maintainState: p.b('maintainState'),
+      expandedAlignment: p.align('expandedAlignment'),
+      expandedCrossAxisAlignment: p.has('expandedCrossAxisAlignment')
+          ? Props.toCrossAxis(p['expandedCrossAxisAlignment'])
+          : null,
+      controlAffinity: switch (p.s('controlAffinity')?.toLowerCase()) {
+        'leading' => ListTileControlAffinity.leading,
+        'trailing' => ListTileControlAffinity.trailing,
+        _ => ListTileControlAffinity.platform,
+      },
+      onExpansionChanged: (v) {
+        _open = v;
+        widget.onChanged?.call(v);
+      },
+      children: widget.children,
     );
   }
 }
