@@ -6,6 +6,18 @@ import 'package:flutter/services.dart';
 import 'logic.dart';
 import 'renderer.dart';
 
+/// ValueNotifier 的同值也通知版：`spec` 用它，保证「整页重渲染」一定触发重建。
+class RenderSpecNotifier extends ValueNotifier<String?> {
+  RenderSpecNotifier(super.value);
+
+  @override
+  set value(String? newValue) {
+    final same = value == newValue;
+    super.value = newValue;
+    if (same) notifyListeners();
+  }
+}
+
 /// Dart 与 Android 原生壳之间的桥。
 ///
 /// 通道名 `androlua/flutter`，两侧约定：
@@ -22,7 +34,11 @@ class FlutterBridge {
   static const MethodChannel videoChannel = MethodChannel('androlua/video');
 
   /// 当前渲染的 widget 树描述（JSON 字符串），由原生 `render` 写入。
-  final ValueNotifier<String?> spec = ValueNotifier<String?>(null);
+  ///
+  /// 用「同值也通知」的 notifier：整页重渲染时如果新 JSON 与上一次完全相同
+  /// （Lua 侧重新渲染了一次、但字段值没变），普通 ValueNotifier 会因字符串相等
+  /// 而**不通知**，界面就“看起来没反应”。
+  final RenderSpecNotifier spec = RenderSpecNotifier(null);
 
   /// 弹窗类命令（dialog/bottomSheet/snackBar/datePicker/timePicker）用的导航 key。
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
