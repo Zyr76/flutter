@@ -724,6 +724,52 @@ class Props {
     'account_circle': Icons.account_circle, 'vpn_key': Icons.vpn_key, 'security': Icons.security,
   };
 
+  /// 密度：'standard' | 'comfortable' | 'compact'，或数字（横纵同值），或 {horizontal, vertical}
+  static VisualDensity? toVisualDensity(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return VisualDensity(horizontal: v.toDouble(), vertical: v.toDouble());
+    if (v is Map) {
+      return VisualDensity(
+        horizontal: (v['horizontal'] as num?)?.toDouble() ?? 0,
+        vertical: (v['vertical'] as num?)?.toDouble() ?? 0,
+      );
+    }
+    switch (v.toString().toLowerCase()) {
+      case 'compact':
+        return VisualDensity.compact;
+      case 'comfortable':
+        return VisualDensity.comfortable;
+      case 'standard':
+        return VisualDensity.standard;
+    }
+    return null;
+  }
+
+  /// 点按目标尺寸：'padded' | 'shrinkwrap'（大小写/下划线都不讲究）
+  static MaterialTapTargetSize? toTapTargetSize(dynamic v) {
+    if (v == null) return null;
+    switch (v.toString().toLowerCase().replaceAll('_', '')) {
+      case 'padded':
+        return MaterialTapTargetSize.padded;
+      case 'shrinkwrap':
+        return MaterialTapTargetSize.shrinkWrap;
+    }
+    return null;
+  }
+
+  /// 偏移：数字（x=y）/ [x, y] / {x, y}
+  static Offset? toOffset(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return Offset(v.toDouble(), v.toDouble());
+    if (v is List && v.length >= 2) {
+      return Offset((v[0] as num).toDouble(), (v[1] as num).toDouble());
+    }
+    if (v is Map) {
+      return Offset((v['x'] as num?)?.toDouble() ?? 0, (v['y'] as num?)?.toDouble() ?? 0);
+    }
+    return null;
+  }
+
   static IconData toIcon(dynamic name) {
     final key = name?.toString().toLowerCase();
     if (key == null) return Icons.widgets;

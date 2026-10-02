@@ -636,7 +636,16 @@ class Renderer {
         );
         break;
       case 'drawer':
-        result = Drawer(backgroundColor: p.color('backgroundColor'), child: child0());
+        result = Drawer(
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          width: p.n('width'),
+          elevation: p.n('elevation'),
+          shadowColor: p.color('shadowColor'),
+          surfaceTintColor: p.color('surfaceTintColor'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
+          child: child0(),
+        );
         break;
       case 'useraccountsdrawerheader':
         result = UserAccountsDrawerHeader(
@@ -682,6 +691,10 @@ class Renderer {
           padding: p.inset('padding'),
           dividerColor: p.color('dividerColor'),
           automaticIndicatorColorAdjustment: p.b('automaticIndicatorColorAdjustment', true),
+          splashFactory: _noSplash(p) ? NoSplash.splashFactory : null,
+          overlayColor: _tabOverlay(p),
+          dividerHeight: p.n('dividerHeight'),
+          indicator: _tabIndicator(p),
         );
         break;
       case 'tabbarview':
@@ -748,6 +761,14 @@ class Renderer {
           label: label == null
               ? null
               : (label is Map || label is List ? _build(label, '$path/label') : Text(label.toString())),
+          isLabelVisible: p.b('isLabelVisible', true),
+          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+          textColor: p.color('textColor'),
+          smallSize: p.n('smallSize'),
+          largeSize: p.n('largeSize'),
+          padding: p.inset('padding'),
+          alignment: p.align('alignment'),
+          offset: Props.toOffset(p['offset']),
           child: children.isEmpty ? null : child0(),
         );
         break;
@@ -776,6 +797,15 @@ class Renderer {
             }
             await Future<void>.delayed(Duration(milliseconds: p.i('delay') ?? 600));
           },
+          color: p.color('color'),
+          backgroundColor: p.color('backgroundColor'),
+          strokeWidth: p.n('strokeWidth'),
+          displacement: p.n('displacement'),
+          edgeOffset: p.n('edgeOffset'),
+          elevation: p.n('elevation'),
+          triggerMode: p.s('triggerMode')?.toLowerCase() == 'anywhere'
+              ? RefreshIndicatorTriggerMode.anywhere
+              : RefreshIndicatorTriggerMode.onEdge,
           child: child0(),
         );
         break;
@@ -1074,19 +1104,37 @@ class Renderer {
       case 'navigationbar':
         result = BridgeNavigationBar(
           key: _nodeKey(p, path),
-          items: p.list('items'),
-          initialIndex: p.i('currentIndex') ?? 0,
-          onTap: (i) => _emit(p['onTap'], i, fallback: p.map),
+          p: p,
+          items: p.list('items') ?? p.list('destinations'),
+          initialIndex: p.i('currentIndex') ?? p.i('selectedIndex') ?? 0,
+          onTap: (i) => _emit(p['onTap'] ?? p['onChange'] ?? p['onDestinationSelected'], i, fallback: p.map),
         );
         break;
       case 'bottomappbar':
-        result = BottomAppBar(child: child0());
+        result = BottomAppBar(
+          color: p.color('color') ?? p.color('backgroundColor'),
+          elevation: p.n('elevation'),
+          height: p.n('height'),
+          padding: p.inset('padding'),
+          notchMargin: p.n('notchMargin'),
+          shadowColor: p.color('shadowColor'),
+          surfaceTintColor: p.color('surfaceTintColor'),
+          shape: Props.toShape(p.s('shape'), p.n('radius')),
+          clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
+          child: child0(),
+        );
         break;
       case 'form':
         result = Form(child: child0());
         break;
       case 'verticaldivider':
-        result = VerticalDivider(color: p.color('color'), thickness: p.n('thickness'));
+        result = VerticalDivider(
+          color: p.color('color'),
+          thickness: p.n('thickness'),
+          width: p.n('width'),
+          indent: p.n('indent'),
+          endIndent: p.n('endIndent'),
+        );
         break;
       case 'richtext':
         result = Text.rich(TextSpan(children: p.list('spans').map((s) {
@@ -1832,6 +1880,20 @@ class Renderer {
   /// 自己会处理这些属性的控件列在 _no*Wrap 里，避免重复注入。
   static Widget _wrapCommon(Widget child, Props p) {
     Widget out = child;
+    // 水波纹/高亮/hover/focus 与密度这类「主题级」属性：包一层 Theme，
+    // 子树里的 InkWell / 按钮 / 列表项 / TabBar 全都跟着变，不用每个控件各接一遍。
+    if (_hasThemePatch(p)) {
+      out = _InteractTheme(
+        noSplash: _noSplash(p),
+        splash: p.color('splashColor'),
+        highlight: p.color('highlightColor'),
+        hover: p.color('hoverColor'),
+        focus: p.color('focusColor'),
+        density: Props.toVisualDensity(p['visualDensity']),
+        tapTarget: Props.toTapTargetSize(p['tapTargetSize'] ?? p['materialTapTargetSize']),
+        child: out,
+      );
+    }
     if (!_noVisibilityWrap.contains(p.type) && p.has('visible')) {
       out = Visibility(visible: p.b('visible', true), child: out);
     }
@@ -1843,6 +1905,11 @@ class Renderer {
       final m = p.inset('margin');
       if (m != null) out = Padding(padding: m, child: out);
     }
+    // 通用 padding：控件自己不吃 padding 时，通用层包一层（Row/Column/Text/Wrap… 都能直接写 padding）
+    if (!_noPaddingWrap.contains(p.type) && !_noMarginWrap.contains(p.type) && p.has('padding')) {
+      final pd = p.inset('padding');
+      if (pd != null) out = Padding(padding: pd, child: out);
+    }
     if (!_noTooltipWrap.contains(p.type) && p.has('tooltip')) {
       final t = p.s('tooltip');
       if (t != null && t.isNotEmpty) out = Tooltip(message: t, child: out);
@@ -1851,7 +1918,8 @@ class Renderer {
     // 这里统一包一层 GestureDetector——否则「给卡片写了 onClick 却没反应」很迷惑。
     if (!_noTapWrap.contains(p.type)) {
       final cb = _voidCallback(p['onTap'], fallback: p.map);
-      if (cb != null) out = GestureDetector(onTap: cb, child: out);
+      final lp = _voidCallback(p['onLongPress'] ?? p['onLongClick'], fallback: p.map);
+      if (cb != null || lp != null) out = GestureDetector(onTap: cb, onLongPress: lp, child: out);
     }
     final w = p['width'];
     final h = p['height'];
@@ -1887,8 +1955,61 @@ class Renderer {
     'chip', 'actionchip', 'filterchip', 'choicechip', 'inputchip',
     'dropdownbutton', 'dropdownbuttonformfield',
   };
-  static const Set<String> _noTooltipWrap = {
-    'tooltip', 'iconbutton', 'floatingactionbutton', 'chip',
+  /// 自己会处理 padding 的控件：通用层不再重复包一层，避免双重内边距。
+  static const Set<String> _noPaddingWrap = {
+    'container', 'card', 'padding', 'sliverpadding', 'animatedpadding', 'animatedcontainer',
+    'tabbar', 'textfield', 'textformfield',
+    'listtile', 'switchlisttile', 'checkboxlisttile', 'radiolisttile',
+    'listview', 'gridview', 'listwheelscrollview', 'reorderablelistview', 'singlechildscrollview',
+    'chip', 'actionchip', 'filterchip', 'choicechip', 'inputchip',
+    'elevatedbutton', 'textbutton', 'filledbutton', 'outlinedbutton', 'materialbutton',
+    'iconbutton', 'cupertinobutton', 'segmentedbutton', 'togglebuttons', 'popupmenubutton',
+    'badge', 'snackbar',
+  };
+
+  /// 要拆水波纹？`noSplash = true`（或 `splash = false` / `splash = "none"`）。
+  static bool _noSplash(Props p) {
+    if (p.b('noSplash')) return true;
+    final s = p['splash'];
+    if (s == false) return true;
+    final t = s?.toString().toLowerCase();
+    return t == 'none' || t == 'off' || t == 'false';
+  }
+
+  static bool _hasThemePatch(Props p) =>
+      _noSplash(p) ||
+      p.has('splashColor') ||
+      p.has('highlightColor') ||
+      p.has('hoverColor') ||
+      p.has('focusColor') ||
+      p.has('visualDensity') ||
+      p.has('tapTargetSize') ||
+      p.has('materialTapTargetSize');
+
+  /// TabBar 的按下/hover 叠加色：noSplash 时全透明（官方文档推荐的组合写法）。
+  static WidgetStateProperty<Color?>? _tabOverlay(Props p) {
+    final c = p.color('overlayColor');
+    if (c != null) return WidgetStatePropertyAll<Color?>(c);
+    if (_noSplash(p)) return const WidgetStatePropertyAll<Color?>(Colors.transparent);
+    return null;
+  }
+
+  /// 自定义下划线指示器：indicator = { color=, weight=, radius=, insets= }
+  static Decoration? _tabIndicator(Props p) {
+    final raw = p['indicator'];
+    if (raw is! Map) return null;
+    final ip = Props.of(raw);
+    return UnderlineTabIndicator(
+      borderSide: BorderSide(
+        color: ip.color('color') ?? const Color(0xFFFFFFFF),
+        width: ip.n('weight') ?? 2.0,
+      ),
+      insets: ip.inset('insets'),
+      borderRadius: Props.toBorderRadius(raw['radius']),
+    );
+  }
+
+  static const Set<String> _noTooltipWrap = {    'tooltip', 'iconbutton', 'floatingactionbutton', 'chip',
     'actionchip', 'filterchip', 'choicechip', 'inputchip', 'materialbutton',
     'button', 'elevatedbutton', 'textbutton', 'filledbutton', 'outlinedbutton',
   };
@@ -3351,6 +3472,47 @@ class _IdNodeState extends State<_IdNode> {
   }
 }
 
+/// 把「水波纹/高亮/hover/focus + 密度」这类主题级属性包成一棵 Theme 子树：
+/// InkWell / 按钮 / 列表项 / TabBar 内部都读 Theme.of(context)，包一层就整体生效。
+class _InteractTheme extends StatelessWidget {
+  const _InteractTheme({
+    required this.child,
+    this.noSplash = false,
+    this.splash,
+    this.highlight,
+    this.hover,
+    this.focus,
+    this.density,
+    this.tapTarget,
+  });
+
+  final Widget child;
+  final bool noSplash;
+  final Color? splash;
+  final Color? highlight;
+  final Color? hover;
+  final Color? focus;
+  final VisualDensity? density;
+  final MaterialTapTargetSize? tapTarget;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context);
+    return Theme(
+      data: base.copyWith(
+        splashFactory: noSplash ? NoSplash.splashFactory : null,
+        splashColor: splash ?? (noSplash ? Colors.transparent : null),
+        highlightColor: highlight ?? (noSplash ? Colors.transparent : null),
+        hoverColor: hover ?? (noSplash ? Colors.transparent : null),
+        focusColor: focus ?? (noSplash ? Colors.transparent : null),
+        visualDensity: density,
+        materialTapTargetSize: tapTarget,
+      ),
+      child: child,
+    );
+  }
+}
+
 class BridgeTabs extends StatefulWidget {
   const BridgeTabs({super.key, required this.id, required this.length, required this.index, this.onChanged, required this.child});
   final String? id;
@@ -3467,7 +3629,8 @@ class _BridgeRangeSliderState extends State<BridgeRangeSlider> {
 }
 
 class BridgeNavigationBar extends StatefulWidget {
-  const BridgeNavigationBar({super.key, required this.items, this.initialIndex = 0, this.onTap});
+  const BridgeNavigationBar({super.key, required this.p, required this.items, this.initialIndex = 0, this.onTap});
+  final Props p;
   final List<dynamic> items;
   final int initialIndex;
   final ValueChanged<int>? onTap;
@@ -3476,20 +3639,24 @@ class BridgeNavigationBar extends StatefulWidget {
 }
 
 class _BridgeNavigationBarState extends State<BridgeNavigationBar> {
-  late int _index = widget.initialIndex;
+  int? _tapped;
 
-  @override
-  void didUpdateWidget(BridgeNavigationBar old) {
-    super.didUpdateWidget(old);
-    if (widget.initialIndex != old.initialIndex) setState(() => _index = widget.initialIndex);
-  }
+  int get _propIndex => widget.items.isEmpty ? 0 : widget.initialIndex.clamp(0, widget.items.length - 1);
 
   @override
   Widget build(BuildContext context) {
+    final p = widget.p;
+    // 属性是声明式的：spec 写 currentIndex=n 就停在第 n 项；用户点过后重建时按属性纠偏
+    final want = _propIndex;
+    if (_tapped != null && _tapped != want) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _tapped != null && _tapped != want) setState(() => _tapped = null);
+      });
+    }
     return NavigationBar(
-      selectedIndex: widget.items.isEmpty ? 0 : _index.clamp(0, widget.items.length - 1),
+      selectedIndex: _tapped ?? want,
       onDestinationSelected: (i) {
-        setState(() => _index = i);
+        setState(() => _tapped = i);
         widget.onTap?.call(i);
       },
       destinations: widget.items.map((e) {
@@ -3499,6 +3666,21 @@ class _BridgeNavigationBarState extends State<BridgeNavigationBar> {
           label: (ip['label'] ?? ip['text'] ?? '').toString(),
         );
       }).toList(),
+      backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+      elevation: p.n('elevation'),
+      shadowColor: p.color('shadowColor'),
+      surfaceTintColor: p.color('surfaceTintColor'),
+      indicatorColor: p.color('indicatorColor'),
+      indicatorShape: Props.toShape(p.s('indicatorShape'), p.n('indicatorRadius')),
+      height: p.n('height'),
+      animationDuration: p.has('animationDuration') ? Props.toDuration(p['animationDuration']) : null,
+      labelBehavior: switch (p.s('labelBehavior')?.toLowerCase()) {
+        'always' || 'alwaysshow' => NavigationDestinationLabelBehavior.alwaysShow,
+        'never' || 'hide' || 'alwayshide' => NavigationDestinationLabelBehavior.alwaysHide,
+        'selected' || 'onlyshowselected' => NavigationDestinationLabelBehavior.onlyShowSelected,
+        _ => null,
+      },
+      overlayColor: Renderer._colorState(p, 'overlayColor'),
     );
   }
 }

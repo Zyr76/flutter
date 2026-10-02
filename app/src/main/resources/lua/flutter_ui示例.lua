@@ -268,7 +268,9 @@ DEMOS[#DEMOS + 1] = { "导航", "TabBar / TabBarView / Drawer / NavigationBar", 
   return shell("导航", {
     DefaultTabController, id = "tabs", length = 3,
     { Column,
-      { TabBar, tabs = { { text = "首页" }, { text = "发现", icon = "search" }, { text = "我的", icon = "person" } } },
+      -- noSplash = true 去掉点标签时的水波纹（写 splash = false / splash = "none" 等价）
+      { TabBar, noSplash = true,
+        tabs = { { text = "首页" }, { text = "发现", icon = "search" }, { text = "我的", icon = "person" } } },
       { Expanded, { TabBarView,
           { Center, { Text, text = "第 1 个标签页" } },
           { Center, { Text, text = "第 2 个标签页" } },
