@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Props 缓存条目：保存原始对象引用，避免 identityHashCode 碰撞时误用。

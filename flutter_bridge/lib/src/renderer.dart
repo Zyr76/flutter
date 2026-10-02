@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -638,10 +639,13 @@ class Renderer {
           endDrawerEnableOpenDragGesture: p.b('endDrawerEnableOpenDragGesture', true),
           drawerScrimColor: p.color('drawerScrimColor'),
           drawerEdgeDragWidth: p.n('drawerEdgeDragWidth'),
-          primary: p.has('primary') ? p.b('primary') : null,
-          persistentFooterAlignment: p.align('persistentFooterAlignment') is Alignment
-              ? (p.align('persistentFooterAlignment') as Alignment)
-              : null,
+          primary: p.b('primary', true),
+          persistentFooterAlignment: switch (p.s('persistentFooterAlignment')?.toLowerCase()) {
+            'start' || 'left' => AlignmentDirectional.centerStart,
+            'end' || 'right' => AlignmentDirectional.centerEnd,
+            'center' => AlignmentDirectional.center,
+            _ => null,
+          },
         );
         break;
       case 'appbar':
@@ -828,10 +832,10 @@ class Renderer {
           },
           color: p.color('color'),
           backgroundColor: p.color('backgroundColor'),
-          strokeWidth: p.n('strokeWidth'),
-          displacement: p.n('displacement'),
-          edgeOffset: p.n('edgeOffset'),
-          elevation: p.n('elevation'),
+          strokeWidth: p.n('strokeWidth') ?? 2.0,
+          displacement: p.n('displacement') ?? 40.0,
+          edgeOffset: p.n('edgeOffset') ?? 0.0,
+          elevation: p.n('elevation') ?? 2.0,
           triggerMode: p.s('triggerMode')?.toLowerCase() == 'anywhere'
               ? RefreshIndicatorTriggerMode.anywhere
               : RefreshIndicatorTriggerMode.onEdge,
@@ -1157,10 +1161,9 @@ class Renderer {
           elevation: p.n('elevation'),
           height: p.n('height'),
           padding: p.inset('padding'),
-          notchMargin: p.n('notchMargin'),
+          notchMargin: p.n('notchMargin') ?? 4.0,
           shadowColor: p.color('shadowColor'),
           surfaceTintColor: p.color('surfaceTintColor'),
-          shape: Props.toShape(p.s('shape'), p.n('radius')),
           clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.none,
           child: child0(),
         );
@@ -2141,7 +2144,7 @@ class Renderer {
         color: ip.color('color') ?? const Color(0xFFFFFFFF),
         width: ip.n('weight') ?? 2.0,
       ),
-      insets: ip.inset('insets'),
+      insets: ip.inset('insets') ?? EdgeInsets.zero,
       borderRadius: Props.toBorderRadius(raw['radius']),
     );
   }
@@ -2917,7 +2920,7 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
         'center' => TextAlignVertical.center,
         _ => null,
       },
-      expands: p.has('expands') ? p.b('expands') : null,
+      expands: p.b('expands'),
       maxLengthEnforcement: switch (p.s('maxLengthEnforcement')?.toLowerCase()) {
         'enforced' => MaxLengthEnforcement.enforced,
         'truncate' || 'truncateaftercompositionends' => MaxLengthEnforcement.truncateAfterCompositionEnds,
@@ -2926,10 +2929,12 @@ class _BridgeTextFieldState extends State<BridgeTextField> {
       },
       inputFormatters: Renderer._textFormatters(p),
       cursorErrorColor: p.color('cursorErrorColor'),
-      scrollPadding: p.inset('scrollPadding'),
-      canRequestFocus: p.has('canRequestFocus') ? p.b('canRequestFocus') : null,
-      dragStartBehavior: p.s('dragStartBehavior')?.toLowerCase() == 'start' ? DragStartBehavior.start : null,
-      clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : null,
+      scrollPadding: p.inset('scrollPadding') ?? const EdgeInsets.all(20.0),
+      canRequestFocus: p.b('canRequestFocus', true),
+      dragStartBehavior: p.s('dragStartBehavior')?.toLowerCase() == 'down'
+          ? DragStartBehavior.down
+          : DragStartBehavior.start,
+      clipBehavior: p.has('clipBehavior') ? Props.toClip(p['clipBehavior']) : Clip.hardEdge,
       onChanged: widget.onChanged,
       onSubmitted: widget.onSubmitted,
     );
