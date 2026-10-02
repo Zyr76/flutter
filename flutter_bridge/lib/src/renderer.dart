@@ -643,8 +643,7 @@ class Renderer {
           persistentFooterAlignment: switch (p.s('persistentFooterAlignment')?.toLowerCase()) {
             'start' || 'left' => AlignmentDirectional.centerStart,
             'end' || 'right' => AlignmentDirectional.centerEnd,
-            'center' => AlignmentDirectional.center,
-            _ => null,
+            _ => AlignmentDirectional.center,
           },
         );
         break;
