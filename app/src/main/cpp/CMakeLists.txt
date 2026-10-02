@@ -5,7 +5,11 @@ enable_language(C)
 
 # 允许中文标识符（Lua 词法 lctype.c 的 LUA_UCID 开关）：让 Lua 脚本能用
 # { 列, 文字="hi" }、渲染Flutter(...) 这类中文语法。
-add_compile_definitions(LUA_UCID)
+#
+# LUA_USE_DLOPEN：打开 package.loadlib 的 dlopen 实现，这样 require "cjson" / "yyjson"
+# 这类 C 扩展模块才能加载（安卓上靠 LuaApplication 把 package.cpath 设成
+# nativeLibraryDir + "/lib?.so"）。不开的话 require 会报 “dynamic libraries not enabled”。
+add_compile_definitions(LUA_UCID LUA_USE_DLOPEN)
 
 # 包含 Lua 头文件
 include_directories(lua)
@@ -96,5 +100,5 @@ add_library(yyjson SHARED
 target_link_libraries(luajava bson cjson canvas crypt md5 xml socket yyjson
     android
     log
-    
+    dl
 )
