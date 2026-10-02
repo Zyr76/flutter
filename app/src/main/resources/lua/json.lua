@@ -38,9 +38,12 @@ local base = _G
 -----------------------------------------------------------------------------
 -- Module declaration
 -----------------------------------------------------------------------------
-module("json")
+local json = {}
 
 -- Public functions
+local encode
+local decode
+local null
 
 -- Private functions
 local decode_scanArray
@@ -163,6 +166,7 @@ end
 -- @return table, int The scanned array as a table, and the position of the next character to scan.
 function decode_scanArray(s,startPos)
   local array = {}	-- The return value
+  local object
   local stringLen = string.len(s)
   base.assert(string.sub(s,startPos,startPos)=='[','decode_scanArray called but array does not start at position ' .. startPos .. ' in string:\n'..s )
   startPos = startPos + 1
@@ -231,7 +235,7 @@ function decode_scanNumber(s,startPos)
     endPos = endPos + 1
   end
   local stringValue = 'return ' .. string.sub(s,startPos, endPos-1)	
-  local stringEval = base.loadstring(stringValue)
+  local stringEval = load(stringValue)
   base.assert(stringEval, 'Failed to scan number [ ' .. stringValue .. '] in JSON string at position ' .. startPos .. ' : ' .. endPos)
   return stringEval(), endPos
 end
@@ -304,7 +308,7 @@ function decode_scanString(s,startPos)
     base.assert(endPos <= stringLen+1, "String decoding failed: unterminated string at position " .. endPos)
   until bEnded
   local stringValue = 'return ' .. string.sub(s, startPos, endPos-1)
-  local stringEval = base.loadstring(stringValue)
+  local stringEval = load(stringValue)
   base.assert(stringEval, 'Failed to load string [ ' .. stringValue .. '] in JSON4Lua.decode_scanString at position ' .. startPos .. ' : ' .. endPos)
   return stringEval(), endPos
 end
@@ -355,7 +359,7 @@ function isArray(t)
       maxIndex = math.max(maxIndex,k)
     else
       if (k=='n') then
-        if v ~= table.getn(t) then return false end  -- False if n does not hold the number of elements
+        if v ~= #t then return false end  -- False if n does not hold the number of elements
       else -- Else of (k=='n')
         if isEncodable(v) then return false end
       end  -- End of (k~='n')
@@ -373,4 +377,14 @@ function isEncodable(o)
   local t = base.type(o)
   return (t=='string' or t=='boolean' or t=='number' or t=='nil' or t=='table') or (t=='function' and o==null)
 end
+
+-----------------------------------------------------------------------------
+-- Module exports
+-----------------------------------------------------------------------------
+
+json.encode = encode
+json.decode = decode
+json.null = null
+
+return json
 

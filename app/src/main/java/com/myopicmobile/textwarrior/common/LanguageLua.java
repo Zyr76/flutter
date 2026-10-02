@@ -33,7 +33,7 @@ public class LanguageLua extends Language {
 	private final static String package_string = "byte|char|dump|find|format|gfind|gmatch|gsub|len|lower|match|pack|packsize|rep|reverse|sub|unpack|upper";
 	private final static String package_table = "clear|clone|concat|const|find|foreach|foreachi|gfind|insert|maxn|move|pack|remove|size|sort|unpack";
 	private final static String package_utf8 = "byte|char|charpattern|charpos|codepoint|codes|escape|find|fold|gfind|gmatch|gsub|insert|len|lower|match|ncasecmp|next|offset|remove|reverse|sub|title|upper|width|widthindex";
-	private final static String extFunctionTarget="activity|call|compile|dump|each|enum|import|loadbitmap|loadlayout|loadmenu|service|set|task|thread|timer|@py|@endpy|@cpp|@endcpp";
+	private final static String extFunctionTarget="activity|call|compile|dump|each|enum|import|loadbitmap|loadlayout|loadmenu|service|set|task|thread|timer|@cpp|@endcpp";
 	private final static String functionTarget   = globalTarget+"|"+extFunctionTarget+"|"+packageName;;
 	private final static String[] keywords = keywordTarget.split("\\|");
 	

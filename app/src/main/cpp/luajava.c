@@ -3215,11 +3215,6 @@ Java_com_luajava_LuaState__1LunRef(JNIEnv *env, jobject jobj, jlong cptr,
     luaL_unref(L, (int) t, (int) ref);
 }
 
-#define LUAJAVA_PY_BLOCK_START "@py"
-#define LUAJAVA_PY_BLOCK_END "@endpy"
-#define LUAJAVA_PY_REQUIRE_LINE "local __hybrid_py = require \"python\"\n"
-#define LUAJAVA_PY_RUN_PREFIX "__hybrid_py.run_code("
-#define LUAJAVA_PY_RUN_SUFFIX ")\n"
 #define LUAJAVA_CPP_BLOCK_START "@cpp"
 #define LUAJAVA_CPP_BLOCK_END "@endcpp"
 #define LUAJAVA_CPP_RUN_PREFIX "luajava.cppBlock("
@@ -3408,7 +3403,6 @@ static int luajava_preprocess_hybrid_script(const char *source,
     size_t i = 0;
     struct luajava_text_buffer block = {NULL, 0, 0};
     int block_mode = 0;
-    int injected_require = 0;
     *has_hybrid = 0;
     *error_message = NULL;
 
@@ -3429,20 +3423,9 @@ static int luajava_preprocess_hybrid_script(const char *source,
         line_len = line_end - line_start;
 
         if (block_mode == 0) {
-            if (luajava_is_marker_line(source + line_start, line_len, LUAJAVA_PY_BLOCK_START)) {
-                *has_hybrid = 1;
-                if (!injected_require) {
-                    if (luajava_text_buffer_append_literal(out, LUAJAVA_PY_REQUIRE_LINE) != 0) {
-                        goto oom_error;
-                    }
-                    injected_require = 1;
-                }
-                block_mode = 1;
-                continue;
-            }
             if (luajava_is_marker_line(source + line_start, line_len, LUAJAVA_CPP_BLOCK_START)) {
                 *has_hybrid = 1;
-                block_mode = 2;
+                block_mode = 1;
                 continue;
             }
             if (luajava_text_buffer_append(out, source + line_start, line_len) != 0) {
@@ -3454,20 +3437,7 @@ static int luajava_preprocess_hybrid_script(const char *source,
             continue;
         }
 
-        if (block_mode == 1 && luajava_is_marker_line(source + line_start, line_len, LUAJAVA_PY_BLOCK_END)) {
-            if (luajava_text_buffer_append_literal(out, LUAJAVA_PY_RUN_PREFIX) != 0 ||
-                luajava_append_lua_escaped_string(out,
-                                                  block.data != NULL ? block.data : "",
-                                                  block.size) != 0 ||
-                luajava_text_buffer_append_literal(out, LUAJAVA_PY_RUN_SUFFIX) != 0) {
-                goto oom_error;
-            }
-            luajava_text_buffer_clear(&block);
-            block_mode = 0;
-            continue;
-        }
-
-        if (block_mode == 2 && luajava_is_marker_line(source + line_start, line_len, LUAJAVA_CPP_BLOCK_END)) {
+        if (block_mode == 1 && luajava_is_marker_line(source + line_start, line_len, LUAJAVA_CPP_BLOCK_END)) {
             if (luajava_text_buffer_append_literal(out, LUAJAVA_CPP_RUN_PREFIX) != 0 ||
                 luajava_append_lua_escaped_string(out,
                                                   block.data != NULL ? block.data : "",
@@ -3487,11 +3457,6 @@ static int luajava_preprocess_hybrid_script(const char *source,
     }
 
     if (block_mode == 1) {
-        *error_message = "Unclosed @py block: missing @endpy";
-        luajava_text_buffer_free(&block);
-        return 1;
-    }
-    if (block_mode == 2) {
         *error_message = "Unclosed @cpp block: missing @endcpp";
         luajava_text_buffer_free(&block);
         return 1;
@@ -3527,8 +3492,7 @@ Java_com_luajava_LuaState__1LloadFile(JNIEnv *env, jobject jobj, jlong cptr,
     if (luajava_read_file(fn, &source) == 0) {
         script_source = source.data != NULL ? source.data : "";
         script_size = source.size;
-        if (luajava_contains_bytes(script_source, script_size, LUAJAVA_PY_BLOCK_START) ||
-            luajava_contains_bytes(script_source, script_size, LUAJAVA_CPP_BLOCK_START)) {
+        if (luajava_contains_bytes(script_source, script_size, LUAJAVA_CPP_BLOCK_START)) {
             if (luajava_preprocess_hybrid_script(script_source, script_size, &transformed, &has_hybrid, &hybrid_error) == 0) {
                 if (has_hybrid) {
                     ret = luaL_loadbuffer(L, transformed.data, transformed.size, fn);

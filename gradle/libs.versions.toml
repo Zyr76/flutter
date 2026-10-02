@@ -5,12 +5,10 @@ appcompat = "1.7.1"
 material = "1.13.0"
 constraintlayout = "2.2.1"
 apksig = "8.13.0"
-chaquopy = "17.0.0"
 splashscreen = "1.0.1"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-chaquopy = { id = "com.chaquo.python", version.ref = "chaquopy" }
 
 [libraries]
 androidx-core = { group = "androidx.core", name = "core", version.ref = "core" }
