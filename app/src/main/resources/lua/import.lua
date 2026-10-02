@@ -229,7 +229,10 @@ local function env_import(env)
             end)
             if not ok then
                 print("debug.lua 加载失败: " .. tostring(err))
+                pcall(function() activity.showToast("debug.lua 加载失败: " .. tostring(err)) end)
             end
+        else
+            print("debug.lua 没找到（package.path 里没有）: " .. tostring(package.path))
         end
     end
 

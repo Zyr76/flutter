@@ -56,6 +56,12 @@ wp.width=-2
 wp.height=-2
 wp.gravity=Gravity.RIGHT | Gravity.CENTER
 wp.flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+-- API 26 起悬浮窗必须用 TYPE_APPLICATION_OVERLAY，否则 addView 直接抛 BadTokenException
+if Build.VERSION.SDK_INT >= 26 then
+  wp.type=WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+else
+  wp.type=WindowManager.LayoutParams.TYPE_PHONE
+end
 
 ids.btn={}
 local btn=loadlayout({
@@ -83,7 +89,20 @@ local btn=loadlayout({
 
 ids.btn.title.getPaint().setFakeBoldText(true)
 
-wm.addView(btn,wp)
+-- addView 失败通常是悬浮窗权限没给（targetSdk 23+ 需用户手动开启）
+local ok,err=pcall(function() wm.addView(btn,wp) end)
+if not ok then
+  print("debug.lua: 浮窗添加失败: "..tostring(err))
+  pcall(function()
+    Toast.makeText(activity,"调试浮窗需要「显示在其他应用上层」权限",Toast.LENGTH_LONG).show()
+  end)
+  pcall(function()
+    local Intent=apply "android.content.Intent"
+    local Uri=apply "android.net.Uri"
+    activity.startActivity(Intent(Intent.ACTION_MANAGE_OVERLAY_PERMISSION,
+      Uri.parse("package:"..activity.getPackageName())))
+  end)
+end
 
 local function readlog(s)
   local p=io.popen("logcat -d -v long "..s)
