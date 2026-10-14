@@ -89,19 +89,21 @@ local 缺失串 = "\1__mmkv_missing__\1"
 local 缺失整数 = -9223372036854775808
 
 local function 转Lua数组(javaArr)
-  -- 注意：不要用 #javaArr 求长度——LuaJava 里 Java 数组的 # 不可靠（实测会得 0）。
-  -- 改成从 0 开始逐个索引，取到 nil 为止。
+  -- LuaJava 的 Java 数组：# 会返回 0（不可用），并且越界索引是【抛错】而不是返回 nil。
+  -- 所以既不能用 #，也不能"取到 nil 为止"，只能逐个用 pcall 探测：
+  -- 抛错或取到 nil 就停止。两种语义（抛错 / 返回 nil）都能安全收尾。
   local t = {}
   if javaArr == nil then return t end
   local i = 0
   while true do
-    local v = javaArr[i]
-    if v == nil then break end
+    local ok, v = pcall(function() return javaArr[i] end)
+    if not ok or v == nil then break end
     t[i + 1] = v
     i = i + 1
   end
   return t
 end
+
 
 -- 读一个键：不预设类型，按 string → long → bool 逐个试（用哨兵值判断"没这个类型"）
 local function 取值(j, k)
