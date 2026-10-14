@@ -89,10 +89,17 @@ local 缺失串 = "\1__mmkv_missing__\1"
 local 缺失整数 = -9223372036854775808
 
 local function 转Lua数组(javaArr)
+  -- 注意：不要用 #javaArr 求长度——LuaJava 里 Java 数组的 # 不可靠（实测会得 0）。
+  -- 改成从 0 开始逐个索引，取到 nil 为止。
   local t = {}
   if javaArr == nil then return t end
-  local n = #javaArr
-  for i = 0, n - 1 do t[i + 1] = javaArr[i] end
+  local i = 0
+  while true do
+    local v = javaArr[i]
+    if v == nil then break end
+    t[i + 1] = v
+    i = i + 1
+  end
   return t
 end
 
