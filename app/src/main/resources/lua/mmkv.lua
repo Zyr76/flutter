@@ -255,4 +255,34 @@ end
 
 mmkv.包装 = 包装
 
+-- ============================================================
+-- mmkv.自检()：逐步打印，用于排查"写了读不到"这类问题
+--   用法：require("mmkv").自检()
+-- ============================================================
+function mmkv.自检(空间)
+  空间 = 空间 or "selftest"
+  local function 试(说明, fn)
+    local ok, v = pcall(fn)
+    print("[mmkv.自检] " .. 说明 .. " -> " .. (ok and tostring(v) or ("失败: " .. tostring(v))))
+    return ok, v
+  end
+  试("版本", function() return MMKV.version() end)
+  试("根目录", function() return MMKV.getRootDir() end)
+  local okkv, kv = 试("取实例 " .. 空间, function() return mmkv.withID(空间) end)
+  if not okkv or type(kv) ~= "table" then return end
+  试("实例 mmapID", function() return kv:mmapID() end)
+  试("封装写 封装键=123", function() return kv:set("封装键", 123) end)
+  试("封装回读 contains", function() return kv:contains("封装键") end)
+  试("封装回读 getInt", function() return kv:getInt("封装键", -1) end)
+  local raw = rawget(kv, "java")
+  试("原生 encode 原生键=原生值", function() return raw.encode("原生键", "原生值") end)
+  试("原生 containsKey", function() return raw.containsKey("原生键") end)
+  试("原生 decodeString", function() return raw.decodeString("原生键") end)
+  试("封装 allKeys", function()
+    local ks = kv:allKeys()
+    return #ks .. " 个: " .. table.concat(ks, ", ")
+  end)
+  试("sync", function() return kv:sync() end)
+end
+
 return mmkv
