@@ -81,6 +81,10 @@ dependencies {
     // 流式布局 FlexboxLayout（FlowLayout）
     implementation("com.google.android.flexbox:flexbox:3.0.0")
 
+    // 腾讯 MMKV（高性能键值存储）；由 resources/lua/mmkv.lua 包一层给脚本用
+    // 版本 2.4.2 与 ULTRIUMA 那份单-so 绑定的 Core 版本一致
+    implementation("com.tencent:mmkv:2.4.2")
+
     // AndroLua + Flutter 桥：Flutter 模块（flutter_bridge）编译出的 AAR。
     // 需先执行 build_flutter_aar.sh / `cd flutter_bridge && flutter build aar` 生成本地仓库。
     debugImplementation("com.androlua.flutter_bridge:flutter_debug:1.0")
