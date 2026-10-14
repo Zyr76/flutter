@@ -98,7 +98,9 @@ end
 
 -- 读一个键：不预设类型，按 string → long → bool 逐个试（用哨兵值判断"没这个类型"）
 local function 取值(j, k)
-  local s = j.getString(k, 缺失串)
+  local raw = j.getString(k, 缺失串)
+  if raw == nil then return nil, nil end
+  local s = tostring(raw)                 -- 兼容 LuaJava 返回 Java String 对象的情况
   if s ~= 缺失串 then return s, "string" end
   local n = j.getLong(k, 缺失整数)
   if n ~= 缺失整数 then return n, "number" end
@@ -184,12 +186,16 @@ function KV:getBool(k, def)
 end
 
 function KV:getTable(k, def)
-  local s = self.java.getString(tostring(k), 缺失串)
-  if s == 缺失串 then return def end
+  local raw = self.java.getString(tostring(k), 缺失串)
+  if raw == nil then return def end
+  local s = tostring(raw)
+  if s == 缺失串 or s == "" then return def end
   if not json then error("mmkv: 读表需要 yyjson 或 cjson（两者都没有）") end
   local ok, v = pcall(json.decode, s)
   if ok and type(v) == "table" then return v end
-  return def
+  -- 读到了内容但不是表：直接把内容报出来（区分"没写到"和"解不出来"）
+  error(string.format("mmkv: 键 %s 的内容不是表（长度 %d，前 80 字符：%s）",
+    tostring(k), #s, s:sub(1, 80)))
 end
 
 function KV:setTable(k, t)
