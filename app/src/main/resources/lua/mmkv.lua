@@ -98,11 +98,11 @@ end
 
 -- 读一个键：不预设类型，按 string → long → bool 逐个试（用哨兵值判断"没这个类型"）
 local function 取值(j, k)
-  local s = j:getString(k, 缺失串)
+  local s = j.getString(k, 缺失串)
   if s ~= 缺失串 then return s, "string" end
-  local n = j:getLong(k, 缺失整数)
+  local n = j.getLong(k, 缺失整数)
   if n ~= 缺失整数 then return n, "number" end
-  if j:containsKey(k) then return j:getBoolean(k, false), "boolean" end
+  if j.containsKey(k) then return j.getBoolean(k, false), "boolean" end
   return nil, nil
 end
 
@@ -111,8 +111,13 @@ KV.__index = function(self, k)
   local f = KV[k]
   if f ~= nil then return f end
   local j = rawget(self, "java")
-  if j ~= nil then return j[k] end
-  return nil
+  if j == nil then return nil end
+  local raw = j[k]
+  -- LuaJava 调 Java 方法用点号、参数里不含 self；这里把冒号调用 kv:原生方法(...) 的 self 丢掉
+  if type(raw) == "function" then
+    return function(_, ...) return raw(...) end
+  end
+  return raw
 end
 
 function KV:set(k, v)
@@ -120,20 +125,20 @@ function KV:set(k, v)
   local key = tostring(k)
   local t = type(v)
   if v == nil then
-    j:removeValueForKey(key)
+    j.removeValueForKey(key)
    elseif t == "boolean" then
-    j:putBoolean(key, v)
+    j.putBoolean(key, v)
    elseif t == "number" then
     if math.type(v) == "integer" then
-      j:putLong(key, v)
+      j.putLong(key, v)
      else
-      j:putString(key, string.format("%.17g", v))
+      j.putString(key, string.format("%.17g", v))
     end
    elseif t == "string" then
-    j:putString(key, v)
+    j.putString(key, v)
    elseif t == "table" then
     if not json then error("mmkv: 存表需要 yyjson 或 cjson（两者都没有）") end
-    j:putString(key, json.encode(v))
+    j.putString(key, json.encode(v))
    else
     error("mmkv: 不支持的类型 " .. t)
   end
@@ -179,7 +184,7 @@ function KV:getBool(k, def)
 end
 
 function KV:getTable(k, def)
-  local s = self.java:getString(tostring(k), 缺失串)
+  local s = self.java.getString(tostring(k), 缺失串)
   if s == 缺失串 then return def end
   if not json then error("mmkv: 读表需要 yyjson 或 cjson（两者都没有）") end
   local ok, v = pcall(json.decode, s)
@@ -189,7 +194,7 @@ end
 
 function KV:setTable(k, t)
   if not json then error("mmkv: 存表需要 yyjson 或 cjson（两者都没有）") end
-  self.java:putString(tostring(k), json.encode(t))
+  self.java.putString(tostring(k), json.encode(t))
   return t
 end
 
@@ -199,35 +204,35 @@ function KV:apply(data)
 end
 
 function KV:contains(k)
-  return self.java:containsKey(tostring(k))
+  return self.java.containsKey(tostring(k))
 end
 
 function KV:remove(k)
-  self.java:removeValueForKey(tostring(k))
+  self.java.removeValueForKey(tostring(k))
 end
 
 function KV:count()
-  return self.java:count()
+  return self.java.count()
 end
 
 function KV:allKeys()
-  return 转Lua数组(self.java:allKeys())
+  return 转Lua数组(self.java.allKeys())
 end
 
 function KV:clear()
-  self.java:clearAll()
+  self.java.clearAll()
 end
 
 function KV:sync()
-  self.java:sync()
+  self.java.sync()
 end
 
 function KV:totalSize()
-  return self.java:totalSize()
+  return self.java.totalSize()
 end
 
 function KV:close()
-  self.java:close()
+  self.java.close()
 end
 
 function 包装(raw)
