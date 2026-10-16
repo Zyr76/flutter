@@ -123,6 +123,7 @@ public final class FlutterLuaBridge {
                     logError("解析 spec 失败，命令式 h.X=值 暂不可用", e);
                 }
                 flutter.render(json);
+                luaPrint(L, "[Flutter] 已下发渲染：" + json.length() + " 字符");
                 bindIds(L, json);
 
                 LuaObject container = getParam(3);
@@ -259,7 +260,7 @@ public final class FlutterLuaBridge {
             public int execute() throws LuaException {
                 FlutterLua f = FlutterLua.peek(context);
                 if (f == null) {
-                    warn(L, "尚未渲染 Flutter 布局，无法通过 id 改属性");
+                    luaPrint(L, "[Flutter] 尚未渲染（无 Flutter 实例），无法改属性");
                     return 0;
                 }
                 String id = L.toString(2);
@@ -273,8 +274,10 @@ public final class FlutterLuaBridge {
                 if ("src".equalsIgnoreCase(key) && value instanceof String && isRelativeImagePath((String) value)) {
                     value = context.getLuaDir() + "/" + value;
                 }
-                if (!f.patchNode(id, key, value)) {
-                    warn(L, "未找到 id=\"" + id + "\" 的节点，无法设置 " + key);
+                if (f.patchNode(id, key, value)) {
+                    luaPrint(L, "[Flutter] 已改属性 " + id + "." + key + " = " + value);
+                } else {
+                    luaPrint(L, "[Flutter] 未找到 id=\"" + id + "\" 的节点，无法设置 " + key);
                 }
                 return 0;
             }
@@ -695,7 +698,7 @@ public final class FlutterLuaBridge {
     }
 
     /** 把消息打到 Lua 控制台（走 Lua 的 print；失败不影响主流程）。 */
-    private static void luaPrint(LuaState L, String msg) {
+    static void luaPrint(LuaState L, String msg) {
         if (L == null) return;
         final int top = L.getTop();
         try {

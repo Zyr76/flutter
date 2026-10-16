@@ -383,14 +383,21 @@ public class FlutterLua {
         if ("nativeEvent".equals(call.method)) {
             final String json = String.valueOf(call.arguments);
             final EventSink sink = eventSink;
-            if (sink != null) {
-                runOnMain(new Runnable() {
-                    @Override
-                    public void run() {
+            runOnMain(new Runnable() {
+                @Override
+                public void run() {
+                    // 诊断事件直接打到 Lua 控制台（排查用）；其余事件照旧交给 Lua 处理器。
+                    if (json.contains("\"patchDiag\"")) {
+                        LuaContext ctx = luaContextRef.get();
+                        if (ctx != null) {
+                            FlutterLuaBridge.luaPrint(ctx.getLuaState(), "[Dart] " + json);
+                        }
+                    }
+                    if (sink != null) {
                         sink.onFlutterEvent(json);
                     }
-                });
-            }
+                }
+            });
             result.success(null);
         } else {
             result.notImplemented();

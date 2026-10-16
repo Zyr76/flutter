@@ -145,6 +145,7 @@ class FlutterBridge {
         final patch = decodeSpec(m['spec']);
         if (nodeSpecs.containsKey(id)) {
           nodeSpecs[id]!.value = patch;
+          emit('patchDiag', '定点重建(已构建) id=$id');
         } else if (spec.value != null && spec.value!.isNotEmpty) {
           // 首次构建前就收到 patch（例如渲染后紧接着 id.dart.X = 值）：
           // 以前这里直接丢弃，表现就是“改了没反应”；现在并入整棵树并全量重建。
@@ -152,11 +153,14 @@ class FlutterBridge {
           if (_mergeById(tree, id, patch)) {
             debugPrint('[Flutter] patch($id) 节点尚未构建 → 已并入整树重建');
             spec.value = jsonEncode(tree);
+            emit('patchDiag', '并入整树重建(未构建) id=$id');
           } else {
             debugPrint('[Flutter] patch($id) 树里也没找到该 id，已忽略');
+            emit('patchDiag', '树里没找到 id=$id（已忽略）');
           }
         } else {
           debugPrint('[Flutter] patch($id) 收到但当前无 spec（渲染未到？），已忽略');
+          emit('patchDiag', '收到 patch id=$id 但当前无 spec（渲染未到？）');
         }
         return null;
       case 'dialog':
