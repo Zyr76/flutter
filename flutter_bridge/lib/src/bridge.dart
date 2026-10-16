@@ -65,6 +65,9 @@ class FlutterBridge {
     _registerVideoHandlers();
     channel.setMethodCallHandler(_onMethodCall);
     videoChannel.setMethodCallHandler(_onVideoCall);
+    // 告诉原生：Dart 侧通道已就绪。引擎启动初期通道缓冲有限（见 ChannelBuffers），
+    // 过早连发多条消息会把先发的挤掉（典型：render 被后面的 patch 顶掉，界面变占位）。
+    channel.invokeMethod<void>('ready').catchError((Object _) {});
   }
 
   /// 视频播放器控制（供 Lua 通过 dartCall 调用）。

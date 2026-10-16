@@ -178,7 +178,11 @@ public class FlutterLua {
     }
 
     /** 保存一份可变的 spec 树并重建 id 索引（每次全量 render 时调用）。 */
+    /** 最近一次 render 的根 spec：Dart 侧就绪后需要补发一次。 */
+    private JSONObject specRoot;
+
     public void setSpec(JSONObject root) {
+        specRoot = root;
         specIndex.clear();
         if (root != null) {
             indexIds(root);
@@ -395,6 +399,19 @@ public class FlutterLua {
                     }
                     if (sink != null) {
                         sink.onFlutterEvent(json);
+                    }
+                }
+            });
+            result.success(null);
+        } else if ("ready".equals(call.method)) {
+            // Dart 侧通道就绪：把最新 spec 补发一次。
+            // 引擎刚启动时通道缓冲容量有限，渲染与命令式改属性连着下发时，
+            // 先发的 render 会被后面的 patch 顶掉 → 界面停在占位。就绪后补发可解决。
+            runOnMain(new Runnable() {
+                @Override
+                public void run() {
+                    if (specRoot != null) {
+                        channel.invokeMethod("render", specRoot.toString());
                     }
                 }
             });
