@@ -137,12 +137,21 @@ class FlutterBridge {
         spec.value = call.arguments as String?;
         return null;
       case 'patch':
-        // 命令式更新：只更新指定 id 节点，由 _IdNode 定点重建，不动全树。
+        // 命令式更新：优先只更新指定 id 节点，由 _IdNode 定点重建，不动全树。
         // 原生传来的 spec 是 JSON 字符串，这里必须解码成结构，否则会被当纯文本渲染。
         final m = (call.arguments as Map).cast<String, dynamic>();
         final id = m['id']?.toString();
-        if (id != null && nodeSpecs.containsKey(id)) {
-          nodeSpecs[id]!.value = decodeSpec(m['spec']);
+        if (id == null) return null;
+        final patch = decodeSpec(m['spec']);
+        if (nodeSpecs.containsKey(id)) {
+          nodeSpecs[id]!.value = patch;
+        } else if (spec.value != null && spec.value!.isNotEmpty) {
+          // 首次构建前就收到 patch（例如渲染后紧接着 id.dart.X = 值）：
+          // 以前这里直接丢弃，表现就是“改了没反应”；现在并入整棵树并全量重建。
+          final tree = decodeSpec(spec.value);
+          if (_mergeById(tree, id, patch)) {
+            spec.value = jsonEncode(tree);
+          }
         }
         return null;
       case 'dialog':
@@ -276,6 +285,26 @@ class FlutterBridge {
       }
     }
     return raw;
+  }
+
+  /// 在 spec 树里按 id 找到节点，把 patch 的字段并进去（用于节点尚未构建时的兜底）。
+  bool _mergeById(dynamic node, String id, dynamic patch) {
+    if (node is Map) {
+      if (node['id']?.toString() == id && patch is Map) {
+        patch.forEach((k, v) {
+          if (k.toString() != 'id') node[k] = v;
+        });
+        return true;
+      }
+      for (final v in node.values) {
+        if (_mergeById(v, id, patch)) return true;
+      }
+    } else if (node is List) {
+      for (final v in node) {
+        if (_mergeById(v, id, patch)) return true;
+      }
+    }
+    return false;
   }
 
   static Color? _parseColor(dynamic v) {
