@@ -645,7 +645,7 @@ public final class FlutterLuaBridge {
         sb.append("  if type(orig) == 'function' then\n");
         sb.append("    _G[n] = function(...)\n");
         sb.append("      if not _G.__flutter_loaded then\n");
-        sb.append("        error('Flutter 渲染需要先导入：请在脚本开头写 require \\"flutter\\"', 2)\n");
+        sb.append("        error('Flutter 渲染需要先导入：请在脚本开头写 require \"flutter\"', 2)\n");
         sb.append("      end\n");
         sb.append("      return orig(...)\n");
         sb.append("    end\n");
