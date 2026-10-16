@@ -24,6 +24,14 @@
 --   非整数   → putString，用 %.17g 格式化（保住 double 全部有效位；读回 getNumber/getDouble）
 --   string   → putString
 --   table    → JSON 字符串（getTable 解回来）
+--
+-- 加密：mmkv.withID("私密", nil, "密钥")  或  mmkv.defaultMMKV(nil, "密钥")
+--   · 建实例时就带密钥 → 该 id 的 mmkv 文件整体是密文（默认 AES-128）
+--   · kv:reKey("新密钥") 换密钥；kv:去加密() 去掉加密；kv:cryptKey() 看当前密钥
+--   · 明文已有数据要转密文，用 kv:reKey("密钥")（会把现有数据转过去）
+--   · 注意：只有走封装（withID/defaultMMKV/init）才会自动 MMKV.initialize()；
+--     直接调 MMKV.mmkvWithID(...) 前必须先 mmkv.init()，否则会报
+--     "You should Call MMKV.initialize() first." 
 
 local mmkv = {}
 
@@ -69,21 +77,33 @@ function mmkv.rootDir()
   return MMKV.getRootDir()
 end
 
-function mmkv.defaultMMKV(mode)
+-- mmkv.defaultMMKV([mode [, cryptKey]])
+function mmkv.defaultMMKV(mode, cryptKey)
   确保初始化()
+  if cryptKey ~= nil then
+    return 包装(MMKV.defaultMMKV(mode or 单进程模式, tostring(cryptKey)))
+  end
   if mode ~= nil then return 包装(MMKV.defaultMMKV(mode, MMKV.getRootDir())) end
   return 包装(MMKV.defaultMMKV())
 end
 mmkv.default = mmkv.defaultMMKV          -- default 会被 AndroLua 编辑器当关键字上色，故留同名别名
 
-function mmkv.withID(id, mode)
+-- mmkv.withID(id [, mode [, cryptKey]])
+--   给了 cryptKey 就是加密实例（该 id 的 mmkv 文件整体是密文）
+function mmkv.withID(id, mode, cryptKey)
   确保初始化()
-  if mode ~= nil then
-    return 包装(MMKV.mmkvWithID(tostring(id), mode))
+  id = tostring(id)
+  if cryptKey ~= nil then
+    return 包装(MMKV.mmkvWithID(id, mode or 单进程模式, tostring(cryptKey)))
   end
-  return 包装(MMKV.mmkvWithID(tostring(id)))
+  if mode ~= nil then
+    return 包装(MMKV.mmkvWithID(id, mode))
+  end
+  return 包装(MMKV.mmkvWithID(id))
 end
 mmkv.open = mmkv.withID                  -- 兼容别名
+
+local 单进程模式 = 1            -- MMKV.SINGLE_PROCESS_MODE
 
 local 缺失串 = "\1__mmkv_missing__\1"
 local 缺失整数 = -9223372036854775808
@@ -248,6 +268,25 @@ end
 
 function KV:close()
   self.java.close()
+end
+
+-- 换密钥（会把现有数据重新加密）
+function KV:reKey(新密钥)
+  local ok, r = pcall(function() return self.java.reKey(新密钥) end)
+  if not ok then print("[mmkv] reKey 失败: " .. tostring(r)) return false end
+  return r
+end
+
+-- 去掉加密（reKey(null)：LuaJava 会把显式 nil 传成 Java null）
+function KV:去加密()
+  local ok, r = pcall(function() return self.java.reKey(nil) end)
+  if not ok then print("[mmkv] 去加密失败: " .. tostring(r)) return false end
+  return r
+end
+
+-- 当前密钥（未加密返回 nil）
+function KV:cryptKey()
+  return self.java.cryptKey()
 end
 
 function 包装(raw)
