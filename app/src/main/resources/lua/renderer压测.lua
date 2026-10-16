@@ -7,6 +7,7 @@
 -- 用法：在 AndroLua 里运行本脚本，点顶部按钮，观察控制台 [压测] 输出与列表滚动顺滑度。
 
 require "import"
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 import "java.lang.System"

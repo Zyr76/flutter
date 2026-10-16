@@ -16,6 +16,7 @@
 --   * 事件统一汇入 收到Flutter事件，再按名字分发（见第 4 节）。
 
 require "import"
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 

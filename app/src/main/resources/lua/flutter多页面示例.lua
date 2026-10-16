@@ -14,6 +14,7 @@
 --   4) 改完状态整页重渲染：渲染Flutter(界面(), host)（全量重渲染很便宜，逻辑最直白）
 -- ============================================================
 require "import"
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 

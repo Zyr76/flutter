@@ -8,6 +8,7 @@
 --   4) 事件：h.onClick（具体回调）与 收到Flutter事件（总监听）【都会】触发。
 
 require "import"
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 

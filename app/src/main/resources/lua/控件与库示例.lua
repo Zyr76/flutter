@@ -17,6 +17,7 @@
 
 require "import"
 require "材料设计"                 -- 引入 MD3 / AndroidX / flexbox / lottie 等类
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 import "com.androlua.*"            -- LuaWebView / LuaEditor

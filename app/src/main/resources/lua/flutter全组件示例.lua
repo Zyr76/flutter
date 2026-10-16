@@ -16,6 +16,7 @@
 --   密度：visualDensity = "compact"/"comfortable"，tapTargetSize = "padded"/"shrinkWrap"
 -- ============================================================
 require "import"
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 

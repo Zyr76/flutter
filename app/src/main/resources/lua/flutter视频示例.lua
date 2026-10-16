@@ -8,6 +8,7 @@
 -- 语法与全部动作见 renderer.dart 里 FlutterControl 的注释。
 
 require "import"
+require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 
