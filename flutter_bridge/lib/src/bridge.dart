@@ -147,17 +147,19 @@ class FlutterBridge {
           nodeSpecs[id]!.value = patch;
           emit('patchDiag', '定点重建(已构建) id=$id');
         } else if (spec.value != null && spec.value!.isNotEmpty) {
-          // 首次构建前就收到 patch（例如渲染后紧接着 id.dart.X = 值）：
-          // 以前这里直接丢弃，表现就是“改了没反应”；现在并入整棵树并全量重建。
-          final tree = decodeSpec(spec.value);
-          if (_mergeById(tree, id, patch)) {
-            debugPrint('[Flutter] patch($id) 节点尚未构建 → 已并入整树重建');
-            spec.value = jsonEncode(tree);
-            emit('patchDiag', '并入整树重建(未构建) id=$id');
-          } else {
-            debugPrint('[Flutter] patch($id) 树里也没找到该 id，已忽略');
-            emit('patchDiag', '树里没找到 id=$id（已忽略）');
-          }
+          // 树还没构建——这是“渲染后紧接着 h.dart.X = 值”的常见时序（原生把 render 和 patch
+          // 连着下发，而本帧尚未 build）。等这一帧构建完再补：那时 id 已注册进 nodeSpecs，
+          // 走的是和“按钮回调里改属性”完全相同的定点通道。
+          // （以前在这里解码整树→合并→重编码，会把整棵树搞坏：改完界面全黑。）
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final notifier = nodeSpecs[id];
+            if (notifier != null) {
+              notifier.value = patch;
+              emit('patchDiag', '帧后定点重建 id=$id');
+            } else {
+              emit('patchDiag', '帧后仍无该节点 id=$id（忽略）');
+            }
+          });
         } else {
           debugPrint('[Flutter] patch($id) 收到但当前无 spec（渲染未到？），已忽略');
           emit('patchDiag', '收到 patch id=$id 但当前无 spec（渲染未到？）');
@@ -294,26 +296,6 @@ class FlutterBridge {
       }
     }
     return raw;
-  }
-
-  /// 在 spec 树里按 id 找到节点，把 patch 的字段并进去（用于节点尚未构建时的兜底）。
-  bool _mergeById(dynamic node, String id, dynamic patch) {
-    if (node is Map) {
-      if (node['id']?.toString() == id && patch is Map) {
-        patch.forEach((k, v) {
-          if (k.toString() != 'id') node[k] = v;
-        });
-        return true;
-      }
-      for (final v in node.values) {
-        if (_mergeById(v, id, patch)) return true;
-      }
-    } else if (node is List) {
-      for (final v in node) {
-        if (_mergeById(v, id, patch)) return true;
-      }
-    }
-    return false;
   }
 
   static Color? _parseColor(dynamic v) {
