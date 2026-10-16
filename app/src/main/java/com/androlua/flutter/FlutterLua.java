@@ -178,7 +178,11 @@ public class FlutterLua {
     }
 
     /** 保存一份可变的 spec 树并重建 id 索引（每次全量 render 时调用）。 */
+    /** 最近一次 render 的根 spec（整树重渲染用；命令式改属性就用它）。 */
+    private JSONObject specRoot;
+
     public void setSpec(JSONObject root) {
+        specRoot = root;
         specIndex.clear();
         if (root != null) {
             indexIds(root);
@@ -242,10 +246,9 @@ public class FlutterLua {
         runOnMain(new Runnable() {
             @Override
             public void run() {
-                HashMap<String, Object> args = new HashMap<String, Object>();
-                args.put("id", id);
-                args.put("spec", json);
-                channel.invokeMethod("patch", args);
+                // 走“整树重渲染”：Dart 侧那个定点 patch 通道实测不生效（改了没反应），
+                // 而 render 路径是验证过可用的，所以命令式改属性也走这里。
+                channel.invokeMethod("render", specRoot != null ? specRoot.toString() : json);
             }
         });
         return true;
