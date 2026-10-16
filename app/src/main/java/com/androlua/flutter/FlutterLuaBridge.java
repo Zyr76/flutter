@@ -94,10 +94,14 @@ public final class FlutterLuaBridge {
     private FlutterLuaBridge() {
     }
 
-    /** 本类注册的所有 Flutter API 全局名（用于统一装「必须 require "flutter"」的守卫）。 */
+    /** 本类注册的所有 Flutter API 全局名（用于统计与日志）。 */
     private static final List<String> FLUTTER_API_NAMES = new ArrayList<String>();
 
+    /** 当前正在注册的 Lua 状态（reg 里包守卫用）。 */
+    private static LuaState CURRENT_L;
+
     public static void register(final LuaState L, final LuaContext context) throws LuaException {
+        CURRENT_L = L;
         rememberState(L, context);
 
         installWidgetFallback(L);
@@ -372,9 +376,7 @@ public final class FlutterLuaBridge {
         reg(dumpHandlers, "flutterHandlers", "Flutter句柄表", "dumpFlutterHandlers");
 
         // 统一守卫：未 require "flutter" 就调用 Flutter API → 直接报错（而不是悄悄不生效）
-        installRequireGuard(L);
-        luaPrint(L, "[Flutter] 守卫已安装：未 require \"flutter\" 时调用渲染 API 会报错（共 "
-                + FLUTTER_API_NAMES.size() + " 个接口名）");
+        reportRequireGuard(L);
     }
 
     /** src 是否是需要拼成绝对路径的“纯文件名/相对路径”。 */
@@ -622,43 +624,43 @@ public final class FlutterLuaBridge {
         return false;
     }
 
-    private static void reg(JavaFunction f, String... names) throws LuaException {
-        for (String n : names) {
-            f.register(n);
+    /**
+     * 注册一个 Flutter API 全局，并包上一层「必须 require \"flutter\"」的守卫。
+     *
+     * <p>守卫在 Java 侧做（而不是在 Lua 里包 _G）：脚本的 _ENV 不一定是同一个 _G 表，
+     * Lua 层贴的包不一定看得见；直接包在注册入口上则无论如何都拦住。
+     * __ 开头的内部接口（如 __flutter_apply）不拦，否则句柄机制会被自己挡住。
+     */
+    private static void reg(final JavaFunction f, final String... names) throws LuaException {
+        final LuaState L = CURRENT_L;
+        for (final String n : names) {
+            if (n.startsWith("__")) {
+                f.register(n);
+                continue;
+            }
+            JavaFunction guarded = new JavaFunction(L) {
+                @Override
+                public int execute() throws LuaException {
+                    L.getGlobal("__flutter_loaded");
+                    boolean ready = L.isBoolean(-1) && L.toBoolean(-1);
+                    L.pop(1);
+                    if (!ready) {
+                        throw new LuaException("Flutter 渲染需要先导入：请在脚本开头写 require \"flutter\"");
+                    }
+                    return f.execute();
+                }
+            };
+            guarded.register(n);
+            FLUTTER_API_NAMES.add(n);
         }
-        Collections.addAll(FLUTTER_API_NAMES, names);
     }
 
-    /**
-     * 给上面注册的 Flutter 全局统一套一层守卫：脚本没有 require "flutter" 就直接报错，
-     * 避免“没导入也能调、但悄悄不生效”——那正是以前“界面只剩引擎占位”这类问题的温床。
-     * 中文/英文名都算，__ 开头的内部接口不拦。
-     */
-    private static void installRequireGuard(LuaState L) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("local names = {");
-        for (String n : FLUTTER_API_NAMES) {
-            if (n.startsWith("__")) continue;
-            sb.append('"').append(n).append("\",");
-        }
-        sb.append("}\n");
-        sb.append("for _, n in ipairs(names) do\n");
-        sb.append("  local orig = _G[n]\n");
-        sb.append("  if type(orig) == 'function' then\n");
-        sb.append("    _G[n] = function(...)\n");
-        sb.append("      if not _G.__flutter_loaded then\n");
-        sb.append("        error('Flutter 渲染需要先导入：请在脚本开头写 require \"flutter\"', 2)\n");
-        sb.append("      end\n");
-        sb.append("      return orig(...)\n");
-        sb.append("    end\n");
-        sb.append("  end\n");
-        sb.append("end\n");
-        if (L.LdoString(sb.toString()) != 0) {
-            Log.w(TAG, "安装 Flutter 守卫失败: " + L.toString(-1));
-            luaPrint(L, "[Flutter] 守卫安装失败：" + L.toString(-1));
-            L.pop(1);
-        }
+    /** 统计一下装了多少个带守卫的 Flutter 接口（只用于打印）。 */
+    private static void reportRequireGuard(LuaState L) {
+        luaPrint(L, "[Flutter] 守卫已安装：未 require \"flutter\" 时调用渲染 API 会直接报错（共 "
+                + FLUTTER_API_NAMES.size() + " 个接口名）");
     }
+
 
     private static void logError(String msg, Throwable t) {
         if (t != null) {

@@ -17,6 +17,7 @@ local context = activity or service
 
 local luadir = context.getLuaDir()
 local ViewGroup = bindClass("android.view.ViewGroup")
+local View = bindClass("android.view.View")   -- instance(t[1], View) 用；不能靠脚本自己 import
 local String = bindClass("java.lang.String")
 local OnClickListener = bindClass("android.view.View$OnClickListener")
 local OnLongClickListener = bindClass("android.view.View$OnLongClickListener")
