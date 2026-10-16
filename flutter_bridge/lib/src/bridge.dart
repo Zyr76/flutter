@@ -150,8 +150,13 @@ class FlutterBridge {
           // 以前这里直接丢弃，表现就是“改了没反应”；现在并入整棵树并全量重建。
           final tree = decodeSpec(spec.value);
           if (_mergeById(tree, id, patch)) {
+            debugPrint('[Flutter] patch($id) 节点尚未构建 → 已并入整树重建');
             spec.value = jsonEncode(tree);
+          } else {
+            debugPrint('[Flutter] patch($id) 树里也没找到该 id，已忽略');
           }
+        } else {
+          debugPrint('[Flutter] patch($id) 收到但当前无 spec（渲染未到？），已忽略');
         }
         return null;
       case 'dialog':

@@ -373,6 +373,8 @@ public final class FlutterLuaBridge {
 
         // 统一守卫：未 require "flutter" 就调用 Flutter API → 直接报错（而不是悄悄不生效）
         installRequireGuard(L);
+        luaPrint(L, "[Flutter] 守卫已安装：未 require \"flutter\" 时调用渲染 API 会报错（共 "
+                + FLUTTER_API_NAMES.size() + " 个接口名）");
     }
 
     /** src 是否是需要拼成绝对路径的“纯文件名/相对路径”。 */
@@ -653,6 +655,7 @@ public final class FlutterLuaBridge {
         sb.append("end\n");
         if (L.LdoString(sb.toString()) != 0) {
             Log.w(TAG, "安装 Flutter 守卫失败: " + L.toString(-1));
+            luaPrint(L, "[Flutter] 守卫安装失败：" + L.toString(-1));
             L.pop(1);
         }
     }
