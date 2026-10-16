@@ -30,6 +30,9 @@ class FlutterBridge {
 
   static const MethodChannel channel = MethodChannel('androlua/flutter');
 
+  /// 渲染尚未到达时先存下的补丁（render 一到就补）。
+  final List<MapEntry<String, dynamic>> _pendingPatches = [];
+
   /// 给 Flutter 里嵌的原生视频播放器（VideoView）用的通道。
   static const MethodChannel videoChannel = MethodChannel('androlua/video');
 
@@ -138,6 +141,14 @@ class FlutterBridge {
     switch (call.method) {
       case 'render':
         spec.value = call.arguments as String?;
+        // 之前渲染没到就排队的补丁，现在一并补上。
+        if (_pendingPatches.isNotEmpty) {
+          final pending = List<MapEntry<String, dynamic>>.from(_pendingPatches);
+          _pendingPatches.clear();
+          for (final e in pending) {
+            _applyPatch(e.key, e.value);
+          }
+        }
         return null;
       case 'patch':
         // 命令式更新：优先只更新指定 id 节点，由 _IdNode 定点重建，不动全树。
@@ -146,26 +157,13 @@ class FlutterBridge {
         final id = m['id']?.toString();
         if (id == null) return null;
         final patch = decodeSpec(m['spec']);
-        if (nodeSpecs.containsKey(id)) {
-          nodeSpecs[id]!.value = patch;
-          emit('patchDiag', '定点重建(已构建) id=$id');
-        } else if (spec.value != null && spec.value!.isNotEmpty) {
-          // 树还没构建——这是“渲染后紧接着 h.dart.X = 值”的常见时序（原生把 render 和 patch
-          // 连着下发，而本帧尚未 build）。等这一帧构建完再补：那时 id 已注册进 nodeSpecs，
-          // 走的是和“按钮回调里改属性”完全相同的定点通道。
-          // （以前在这里解码整树→合并→重编码，会把整棵树搞坏：改完界面全黑。）
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            final notifier = nodeSpecs[id];
-            if (notifier != null) {
-              notifier.value = patch;
-              emit('patchDiag', '帧后定点重建 id=$id');
-            } else {
-              emit('patchDiag', '帧后仍无该节点 id=$id（忽略）');
-            }
-          });
+        if (spec.value == null || spec.value!.isEmpty) {
+          // 渲染还没到（引擎刚启动时 render/patch 可能乱序或被通道缓冲丢弃）：
+          // 先存着，render 一到再补，而不是丢掉（丢掉就是“改了没反应”）。
+          _pendingPatches.add(MapEntry(id, patch));
+          emit('patchDiag', 'spec 未到，补丁已排队 id=$id');
         } else {
-          debugPrint('[Flutter] patch($id) 收到但当前无 spec（渲染未到？），已忽略');
-          emit('patchDiag', '收到 patch id=$id 但当前无 spec（渲染未到？）');
+          _applyPatch(id, patch);
         }
         return null;
       case 'dialog':
@@ -290,6 +288,25 @@ class FlutterBridge {
   }
 
   /// 把原生传来的 spec（JSON 字符串）解码成 Dart 结构；已是结构则原样返回。
+  /// 打一个定点补丁：节点已构建就定点重建；尚未构建就等首帧构建完再补
+  /// （走的是和按钮回调里改属性完全相同的定点通道，不动全树）。
+  void _applyPatch(String id, dynamic patch) {
+    if (nodeSpecs.containsKey(id)) {
+      nodeSpecs[id]!.value = patch;
+      emit('patchDiag', '定点重建(已构建) id=$id');
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notifier = nodeSpecs[id];
+      if (notifier != null) {
+        notifier.value = patch;
+        emit('patchDiag', '帧后定点重建 id=$id');
+      } else {
+        emit('patchDiag', '帧后仍无该节点 id=$id（忽略）');
+      }
+    });
+  }
+
   dynamic decodeSpec(dynamic raw) {
     if (raw is String) {
       try {

@@ -180,6 +180,8 @@ public class FlutterLua {
     /** 保存一份可变的 spec 树并重建 id 索引（每次全量 render 时调用）。 */
     /** 最近一次 render 的根 spec：Dart 侧就绪后需要补发一次。 */
     private JSONObject specRoot;
+    /** Dart 侧通道是否已就绪（收到过 ready）。 */
+    private boolean dartReady;
 
     public void setSpec(JSONObject root) {
         specRoot = root;
@@ -187,6 +189,21 @@ public class FlutterLua {
         if (root != null) {
             indexIds(root);
         }
+        // Dart 比原生先就绪时（引擎刚创建 main() 就跑完），这里补发。
+        if (dartReady) {
+            replayRender();
+        }
+    }
+
+    /** 把最新 spec 补发一次（引擎启动期的下发可能被通道缓冲丢弃）。 */
+    private void replayRender() {
+        if (specRoot == null) return;
+        runOnMain(new Runnable() {
+            @Override
+            public void run() {
+                channel.invokeMethod("render", specRoot.toString());
+            }
+        });
     }
 
     private void indexIds(Object node) {
@@ -407,14 +424,12 @@ public class FlutterLua {
             // Dart 侧通道就绪：把最新 spec 补发一次。
             // 引擎刚启动时通道缓冲容量有限，渲染与命令式改属性连着下发时，
             // 先发的 render 会被后面的 patch 顶掉 → 界面停在占位。就绪后补发可解决。
-            runOnMain(new Runnable() {
-                @Override
-                public void run() {
-                    if (specRoot != null) {
-                        channel.invokeMethod("render", specRoot.toString());
-                    }
-                }
-            });
+            dartReady = true;
+            LuaContext ctx = luaContextRef.get();
+            if (ctx != null) {
+                FlutterLuaBridge.luaPrint(ctx.getLuaState(), "[Flutter] Dart 侧已就绪，补发渲染");
+            }
+            replayRender();
             result.success(null);
         } else {
             result.notImplemented();
