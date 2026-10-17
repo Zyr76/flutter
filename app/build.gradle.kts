@@ -85,6 +85,12 @@ dependencies {
     // 版本 2.4.2 与 ULTRIUMA 那份单-so 绑定的 Core 版本一致
     implementation("com.tencent:mmkv:2.4.2")
 
+    // ObjectBox 嵌入式对象数据库；由 resources/lua/objectbox.lua 包一层给脚本用。
+    // 实体必须走注解处理器在编译期生成访问代码（MyObjectBox / LuaObject_），
+    // 所以 processor 与 runtime 版本要完全一致。
+    implementation("io.objectbox:objectbox-android:5.4.2")
+    annotationProcessor("io.objectbox:objectbox-processor:5.4.2")
+
     // AndroLua + Flutter 桥：Flutter 模块（flutter_bridge）编译出的 AAR。
     // 需先执行 build_flutter_aar.sh / `cd flutter_bridge && flutter build aar` 生成本地仓库。
     debugImplementation("com.androlua.flutter_bridge:flutter_debug:1.0")

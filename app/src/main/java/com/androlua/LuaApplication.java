@@ -166,6 +166,8 @@ public class LuaApplication extends Application implements LuaContext {
     public void onCreate() {
         super.onCreate();
         mApp = this;
+        // 只记录上下文，数据库在首次使用 objectbox 时才打开
+        com.androlua.objectbox.ObjectBox.init(this);
         CrashHandler crashHandler = CrashHandler.getInstance();
         // 注册crashHandler
         crashHandler.init(getApplicationContext());
