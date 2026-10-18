@@ -1301,7 +1301,7 @@ class Renderer {
               key: ValueKey('$path/ri$i'),
               child: _build(rNeedsSubst ? _subst(rTemplate, i) : rTemplate, '$path/$i') ?? const SizedBox.shrink(),
             ),
-            onReorder: (a, b) => _emit(p['onReorder'], {'oldIndex': a, 'newIndex': b}, fallback: p.map),
+            onReorderItem: (a, b) => _emit(p['onReorder'], {'oldIndex': a, 'newIndex': b}, fallback: p.map),
           );
         } else {
           result = ListView(children: children);
