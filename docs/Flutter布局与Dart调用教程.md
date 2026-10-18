@@ -168,6 +168,32 @@ end
 
 ---
 
+## 4.5 受控控件：属性是唯一真源
+
+下面这些控件的**选中项/文本完全由属性决定**，用户操作**只回传事件**，不会自己改状态：
+
+| 控件 | 属性 | 事件 | 不回写的后果 |
+|---|---|---|---|
+| `NavigationBar` | `currentIndex` | `onTap` | 点了**停在原选项**（无视觉反馈） |
+| `BottomNavigationBar` | `currentIndex` | `onTap` | 同上 |
+| `DefaultTabController` | `index` | `onChange` | 切页后会被拉回属性值 |
+| `SearchBar` | `text` | `onChange` | 输入内容不会被外部覆盖（本地仍可输入） |
+| `DropdownButtonFormField` | `value` | `onChange` | 外部改 value 不会反映到界面 |
+
+**因此回调里必须把新值写回属性**，这是声明式 UI 的基本约定：
+
+```lua
+-- 反例：点了没反应（回调是空的）
+{ NavigationBar, id = "nav", currentIndex = 0, onTap = "navChanged", items = { ... } }
+function navChanged(e) end
+
+-- 正例：把用户选的下标写回属性，界面随之切换
+function navChanged(e) nav.dart.CurrentIndex = e.value end
+```
+
+> 如果你的状态在自己的 Lua 表里，也可以写成 `我的状态页 = e.value + 1; 重新渲染()`
+> ——只要最终让 spec 里的属性等于用户想要的值即可。
+
 ## 5. 图片：`src`
 
 `src` 一个入口，Dart 自动判断来源：
