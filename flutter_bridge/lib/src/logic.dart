@@ -12,6 +12,7 @@
 // 另外，任何带 id 的控件都能用 Lua 的 `id.dart.属性 = 值` 命令式改属性
 // （原生 patchNode → Dart 定点重建），不经过本文件。
 
+import 'bridge.dart';
 import 'renderer.dart';
 
 void registerDefaultHandlers(
