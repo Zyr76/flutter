@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.HostnameVerifier;
@@ -76,11 +77,16 @@ public final class LuaOkHttp {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
+    /** P3-10：主线程还有未处理的进度回调时跳过新投递，避免回调慢时主线程积压。 */
+    private static final AtomicBoolean PROGRESS_PENDING = new AtomicBoolean(false);
+
     // ---------- 可重建的客户端组件（cache / proxy / ssl）----------
     private static File cacheDir = null;
     private static long cacheSize = 0;
     private static Proxy proxy = null;
     private static boolean trustAll = false;
+    private static final Map<Integer, OkHttpClient> CLIENT_CACHE = new ConcurrentHashMap<Integer, OkHttpClient>();
+
     private static volatile OkHttpClient CLIENT = buildClient();
 
     private static OkHttpClient buildClient() {
@@ -358,13 +364,12 @@ public final class LuaOkHttp {
         }
     }
 
-    private static final Map<Integer, OkHttpClient> CLIENT_CACHE = new ConcurrentHashMap<Integer, OkHttpClient>();
 
     private static OkHttpClient clientFor(int timeoutMs, boolean forDownload) {
         if (timeoutMs <= 0) {
             return CLIENT;
         }
-        int cacheKey = forDownload ? -timeoutMs : timeoutMs;
+        int cacheKey = timeoutMs * 2 + (forDownload ? 1 : 0);   // P3-12：负数不参与，避免与普通请求撞 key
         OkHttpClient cached = CLIENT_CACHE.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -452,9 +457,9 @@ public final class LuaOkHttp {
                 // P1-4：两者同时给时 body 会被忽略，明确报出来而不是静默丢弃
                 emitLog(null, "error", "form 与 body 同时存在，body 被忽略");
             }
-            String kv = formLog == null || formLog.length() == 0 ? "" : formLog.length() > 0
-                    ? formLog.substring(0, formLog.length() - 1)
-                    : "";
+            String kv = (formLog == null || formLog.length() == 0)
+                    ? ""
+                    : formLog.substring(0, formLog.length() - 1);
             if (DEBUG) {
                 log(null, "info", tag + " form: " + kv);
             }
@@ -481,6 +486,8 @@ public final class LuaOkHttp {
         Object cs = opts == null ? null : opts.get("charset");
         Charset charset;
         if ("bytes".equals(rt)) {
+            // P1-3：返回的 String 是"字节按 ISO-8859-1 一一映射"的结果。
+            // Lua 侧必须用 string.byte / string.char 逐字节还原，不能当 UTF-8 文本处理。
             charset = Charset.forName("ISO-8859-1");
         } else if (cs != null) {
             charset = Charset.forName(String.valueOf(cs));
@@ -507,7 +514,12 @@ public final class LuaOkHttp {
         return new String(bos.toByteArray(), charset);
     }
 
-    /** 执行一次请求（含重试），结果交给 sink。返回可取消句柄。 */
+    /**
+     * 执行一次请求（含重试），结果交给 sink。返回可取消句柄。
+     *
+     * <p>P2-6 契约：同步失败（url 非法、构造失败）一律返回 null **且不调用 sink**，
+     * 失败信息已写入调用方需自取的路径；all() 依赖这一点，勿改成"同步也回调 sink"。
+     */
     private static Handle exec(final LuaTable opts, final Sink sink) {
         final String tag = UUID.randomUUID().toString().substring(0, 8);
         String method = str(opts, "method", "GET").toUpperCase();
@@ -557,6 +569,8 @@ public final class LuaOkHttp {
                     log(null, "info", tag + " 重试中（剩 " + left[0] + " 次）：" + msg(e));
                     try {
                         Object to = opts.get("timeout");
+                        // P3-8：重试复用原 Request，仅适用于可重放 body（FormBody / 字符串）。
+                        // 若将来支持一次性流式 body，必须在此重建 request 或禁止重试。
                         Call again = clientFor(to instanceof Number ? ((Number) to).intValue() : 0, false)
                                 .newCall(c.request());
                         handle.set(again);          // 取消转发到重试后的 Call
@@ -808,7 +822,8 @@ public final class LuaOkHttp {
                         os.write(buf, 0, n);
                         total += n;
                         long now = System.currentTimeMillis();
-                        if (onProgress != null && now - lastPost >= 250) {
+                        if (onProgress != null && now - lastPost >= 250
+                                && PROGRESS_PENDING.compareAndSet(false, true)) {
                             lastPost = now;
                             reportProgress(onProgress, total, expected);
                         }
@@ -851,12 +866,19 @@ public final class LuaOkHttp {
         private volatile int attempt;
         volatile boolean manualClose;
 
+        /** 文本帧。P3-11：返回 false 只代表"未连接或队列拒收"，用 readyState() 区分原因。 */
         public boolean send(String text) {
             WebSocket w = ws;
             return w != null && w.send(text == null ? "" : text);
         }
 
-        /** [M1] 发送二进制帧：Lua 字符串按 ISO-8859-1 视为字节串。 */
+        /**
+         * [M1] 发送二进制帧。
+         *
+         * <p>P1-4：data 必须是**原始字节串**（Lua 侧用 string.char 构造）。
+         * 若传入含 >0xFF 字符的文本（如中文），ISO-8859-1 编码会把它们替换成 '?'，
+         * 数据会静默损坏——文本请用 send()。
+         */
         public boolean sendBinary(String data) {
             WebSocket w = ws;
             if (w == null) {
@@ -1301,6 +1323,8 @@ public final class LuaOkHttp {
                     onProgress.call((double) received, (double) total);
                 } catch (Exception e) {
                     emitLog(null, "error", "进度回调出错：" + msg(e));   // P3-3
+                } finally {
+                    PROGRESS_PENDING.set(false);                        // P3-10 放行下一次
                 }
             }
         });
@@ -1337,6 +1361,16 @@ public final class LuaOkHttp {
                                 list.put((double) (i + 1), values.get(i));
                             }
                             all.put(name, list);
+                        }
+                        // P2-7：headers 与 headersAll 都提供小写 key，保持一致
+                        for (String name : response.headers().names()) {
+                            List<String> vs = response.headers(name);
+                            LuaTable<Object, Object> list = new LuaTable<Object, Object>(L);
+                            for (int i = 0; i < vs.size(); i++) {
+                                list.put((double) (i + 1), vs.get(i));
+                            }
+                            all.put(name, list);
+                            all.put(name.toLowerCase(), list);
                         }
                         t.put("headers", h);
                         t.put("headersAll", all);
