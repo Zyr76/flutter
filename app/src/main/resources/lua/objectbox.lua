@@ -11,7 +11,10 @@
 --   ob.删("配置", "主题")
 --   ob.清空("配置")
 local ObjectBox = luajava.bindClass("com.androlua.objectbox.ObjectBox")
-local json = require "cjson"
+
+-- 用 yyjson 而不是 cjson：自带 cjson 把数字精度硬限制在 1~14 位（DEFAULT_ENCODE_NUMBER_PRECISION=14，
+-- 改不了），浮点和大整数往返会丢值；yyjson 输出最短可往返表示，2^53+1 也能原样回来。
+local json = require "yyjson"
 
 local M = {}
 
