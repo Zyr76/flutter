@@ -362,11 +362,11 @@ end)
 - **响应类型**：`opts.responseType = "text"`（默认）或 `"bytes"`（二进制按字节串返回）；`opts.charset = "gbk"` 可手动指定解码。
 - **下载 / 上传**：`ok.download(url, path, cb, { timeout = 60000, onProgress = function(rec, total) end })`（流式写文件，进度约 250ms 一次，`total` 未知时为 -1）、`ok.upload(url, "file", path, cb, timeoutMs)`（multipart）。
 - **日志**：`ok.debug(true)` 打印请求/响应；`ok.setLogger(function(level, msg) end)` 自定义输出（可写文件/上报）。
-- **批量并发**：`ok.all({ req1, req2 }, function(results) end)`，全部结束按序回调。
+- **批量并发**：`ok.all({ req1, req2 }, function(results) end)`，全部结束按序回调；返回聚合句柄，`ok.cancel(它)` 可一次性取消全部子请求。
 - **多文件上传**：`ok.uploadMany(url, { {field="img", path="/a.jpg"} }, { token = "x" }, cb)`。
 - **断点续传**：`ok.download(url, path, cb, { resume = true })`（请求 Range，206 时追加写）。
-  续传期间写的是 `path.part`，**成功后才改名为 `path`**——这样上次下到的错误响应体不会被当成本次起点；
-  取消时：非续传会删掉半截文件，续传保留 `.part` 供下次接着下。
+  下载（含非续传）**一律先写 `path.part`，成功后才改名为 `path`**——中途失败或取消都不会损坏已有的同名文件；
+  取消时：非续传会删掉 `.part`，续传保留它供下次接着下。服务端不支持 Range（返回 200）时会改为重新下载（debug 日志可见）。
 - **JSON**：`opts.json` 由 **Lua 门面**用 yyjson 编码成 `body` 并设 `contentType`（Java 侧不重复实现）。
 - **全局配置**：`ok.setCache(dir, bytes)`、`ok.setProxy(host, port)` / `ok.clearProxy()`、
   `ok.setSslVerify(false)`（仅调试）、`ok.setCookieFile(path)`（Cookie 落盘，存在则自动加载）。

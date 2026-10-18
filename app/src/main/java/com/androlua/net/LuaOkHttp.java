@@ -202,6 +202,11 @@ public final class LuaOkHttp {
                         continue;
                     }
                     String host = line.substring(0, tab);
+                    // [1] 防御：某些来源会写出前导点（.example.com），HttpUrl 不接受；
+                    // 去掉后再用 cookie 自身的 Domain 属性还原作用域
+                    if (host.startsWith(".")) {
+                        host = host.substring(1);
+                    }
                     HttpUrl u = HttpUrl.parse("https://" + host + "/");
                     if (u == null) {
                         continue;
@@ -321,7 +326,7 @@ public final class LuaOkHttp {
         boolean canceled;
     }
 
-    public static final class Handle {
+    public static class Handle {
         private volatile Call current;
 
         void set(Call c) {
@@ -503,7 +508,10 @@ public final class LuaOkHttp {
         }
 
         final Handle handle = new Handle();
-        handle.set(call);
+        handle.set(call);                       // [3] 必须在 enqueue 之前，否则同步回调时 cancel 扑空
+        if (!idempotent && retries > 0) {
+            log(null, "info", tag + " " + method + " 不自动重试，retries 被忽略");  // [4]
+        }
         final int[] left = {idempotent ? retries : 0};
         enqueue(call, opts, tag, sink, left, handle);
         return handle;
@@ -570,16 +578,28 @@ public final class LuaOkHttp {
     }
 
     /** [12] 并发执行多个请求，全部结束后按序回调：cb({ {ok,...}, {ok,...} })。 */
-    public static void all(LuaTable reqs, final LuaObject callback) {
+    public static Handle all(LuaTable reqs, final LuaObject callback) {
         if (reqs == null || callback == null) {
             throw new IllegalArgumentException("okhttp.all(reqs, callback)：两个参数都必填");
         }
+        // [6] 返回聚合句柄：ok.cancel(group) 可一次性取消所有子请求
+        final List<Handle> children = new ArrayList<Handle>();
+        final Handle group = new Handle() {
+            @Override
+            public void cancel() {
+                synchronized (children) {
+                    for (Handle h : children) {
+                        h.cancel();
+                    }
+                }
+            }
+        };
         final int n = reqs.length();
         final Result[] slots = new Result[n + 1];
         final AtomicInteger left = new AtomicInteger(n);
         if (n == 0) {
             deliverAll(callback, slots, 0);
-            return;
+            return group;
         }
         for (int i = 1; i <= n; i++) {
             final Object item = reqs.get((double) i);
@@ -593,7 +613,7 @@ public final class LuaOkHttp {
                 continue;
             }
             final int idx = i;
-            exec((LuaTable) item, new Sink() {
+            Handle child = exec((LuaTable) item, new Sink() {
                 @Override
                 public void done(Response response, String body, String error, boolean canceled) {
                     Result r = new Result();
@@ -614,7 +634,13 @@ public final class LuaOkHttp {
                     }
                 }
             });
+            if (child != null) {
+                synchronized (children) {
+                    children.add(child);
+                }
+            }
         }
+        return group;
     }
 
     private static void deliverAll(final LuaObject callback, final Result[] slots, final int n) {
@@ -666,8 +692,8 @@ public final class LuaOkHttp {
             throw new IllegalArgumentException("okhttp.download(url, path, callback)：参数必填");
         }
         final File target = new File(path);
-        // P1-6：续传写在 .part 上，成功才改成正式文件——避免把上次的错误响应体当成本次起点
-        final File out = resume ? new File(path + ".part") : target;
+        // [2] 不论是否续传都写 .part，成功才改名：避免中途失败把已有的完整文件截断损坏
+        final File out = new File(path + ".part");
         final long offset = (resume && out.isFile()) ? out.length() : 0;
         Request.Builder rb;
         try {
@@ -691,6 +717,8 @@ public final class LuaOkHttp {
             deliver(callback, null, null, "请求构造失败：" + msg(e), false);
             return null;
         }
+        Handle handle = new Handle();
+        handle.set(call);                       // [3] 先于 enqueue
         call.enqueue(new Callback() {
             @Override
             public void onFailure(Call c, IOException e) {
@@ -700,6 +728,9 @@ public final class LuaOkHttp {
             @Override
             public void onResponse(Call c, Response response) {
                 boolean appending = offset > 0 && response.code() == 206;
+                if (offset > 0 && response.code() != 206) {
+                    log(null, "info", "服务端不支持 Range（返回 " + response.code() + "），改为重新下载");  // [5]
+                }
                 if (!response.isSuccessful() && response.code() != 206) {
                     int code = response.code();
                     response.close();               // P0-1：不关会泄漏连接
@@ -751,21 +782,17 @@ public final class LuaOkHttp {
                     deliver(callback, null, null, "写入失败：" + msg(e), false);
                     return;
                 }
-                if (resume) {
-                    if (target.exists() && !target.delete()) {
-                        deliver(callback, null, null, "覆盖目标文件失败：" + target, false);
-                        return;
-                    }
-                    if (!out.renameTo(target)) {
-                        deliver(callback, null, null, "改名失败：" + out + " → " + target, false);
-                        return;
-                    }
+                if (target.exists() && !target.delete()) {
+                    deliver(callback, null, null, "覆盖目标文件失败：" + target, false);
+                    return;
+                }
+                if (!out.renameTo(target)) {
+                    deliver(callback, null, null, "改名失败：" + out + " → " + target, false);
+                    return;
                 }
                 deliverDownload(callback, target.getAbsolutePath(), total, null);
             }
         });
-        Handle handle = new Handle();
-        handle.set(call);
         return handle;
     }
 
@@ -835,6 +862,8 @@ public final class LuaOkHttp {
             deliver(callback, null, null, "请求构造失败：" + msg(e), false);
             return null;
         }
+        Handle handle = new Handle();
+        handle.set(call);                       // [3] 先于 enqueue
         call.enqueue(new Callback() {
             @Override
             public void onFailure(Call c, IOException e) {
@@ -854,8 +883,6 @@ public final class LuaOkHttp {
                 deliver(callback, response, text, null, false);
             }
         });
-        Handle handle = new Handle();
-        handle.set(call);
         return handle;
     }
 
