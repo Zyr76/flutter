@@ -84,7 +84,48 @@ assert(ob.数量(SPACE) == N / 2, "ObjectBox 删除后数量不对")
 
 local obTotal = ms(tAll)
 ob.清空(SPACE)
-print(string.format("  ObjectBox 小计 %.1f ms", obTotal))
+print(string.format("  ObjectBox 逐条合计 %.1f ms", obTotal))
+
+-- ---- ObjectBox 批量（与 SQLite 的单事务批量同口径）----
+print("\n  —— ObjectBox 批量接口（存多/取多/删多，一次调用一个事务）——")
+ob.清空(SPACE)
+
+t = now()
+local bulk = {}
+for i = 1, N do
+  bulk[key(i)] = { 序号 = i, 标题 = "条目" .. i, 标签 = { "a", "b" }, 启用 = i % 2 == 0 }
+end
+ob.存多(SPACE, bulk)
+record("ObjectBox 批量写（存多）", N, ms(t))
+assert(ob.数量(SPACE) == N, "批量写后数量不对")
+
+t = now()
+local readKeys = {}
+for i = 1, N do readKeys[i] = key(mixed(i)) end
+local readVals = ob.取多(SPACE, readKeys)
+local gotN = 0
+for i = 1, N do
+  if readVals[i] then gotN = gotN + 1 end
+end
+record("ObjectBox 批量读（取多）", N, ms(t))
+assert(gotN == N, "批量读未全部命中 " .. gotN)
+
+t = now()
+local upd = {}
+for i = 1, N / 2 do
+  upd[key(i)] = { 序号 = i, 标题 = "改过" .. i, 标签 = { "c" }, 启用 = false }
+end
+ob.存多(SPACE, upd)
+record("ObjectBox 批量更新（存多）", N / 2, ms(t))
+
+t = now()
+local delKeys = {}
+for i = 1, N / 2 do delKeys[i] = key(i) end
+ob.删多(SPACE, delKeys)
+record("ObjectBox 批量删（删多）", N / 2, ms(t))
+assert(ob.数量(SPACE) == N / 2, "批量删后数量不对")
+
+ob.清空(SPACE)
 
 -- ============================================================ SQLite（WAL + 单事务）
 print("\n" .. string.rep("-", 68))
@@ -221,10 +262,14 @@ local function find(name)
   return nil
 end
 local pairsToCompare = {
-  { "写入", "ObjectBox 写入", "SQLite 写入（单事务）" },
+  { "写入(逐条/事务)", "ObjectBox 写入", "SQLite 写入（单事务）" },
+  { "写入(批量/批量)", "ObjectBox 批量写（存多）", "SQLite 写入（单事务）" },
   { "随机读", "ObjectBox 随机读", "SQLite 随机读" },
-  { "更新", "ObjectBox 更新", "SQLite 更新（单事务）" },
-  { "删除", "ObjectBox 删除", "SQLite 删除（单事务）" },
+  { "批量读", "ObjectBox 批量读（取多）", "SQLite 随机读" },
+  { "更新(逐条/事务)", "ObjectBox 更新", "SQLite 更新（单事务）" },
+  { "更新(批量/批量)", "ObjectBox 批量更新（存多）", "SQLite 更新（单事务）" },
+  { "删除(逐条/事务)", "ObjectBox 删除", "SQLite 删除（单事务）" },
+  { "删除(批量/批量)", "ObjectBox 批量删（删多）", "SQLite 删除（单事务）" },
 }
 print("相对速度（>1 表示 ObjectBox 更快）：")
 for _, p in ipairs(pairsToCompare) do
