@@ -610,11 +610,10 @@ class Renderer {
         break;
       case 'dropdownbutton' || 'dropdownbuttonformfield':
         result = p.type == 'dropdownbuttonformfield'
-            ? DropdownButtonFormField<String>(
-                initialValue: p.s('value'),
-                items: _dropdownItems(p['items']),
+            ? BridgeDropdownForm(
+                key: _nodeKey(p, path),
+                p: p,
                 onChanged: (v) => _emit(p['onChange'], v, fallback: p.map),
-                decoration: InputDecoration(labelText: _decText(p, 'labelText'), border: const OutlineInputBorder()),
               )
             : BridgeDropdown(
                 key: _nodeKey(p, path),
@@ -1572,17 +1571,10 @@ class Renderer {
         break;
       case 'searchbar':
         final trailing = _children(p['trailing'], '$path/trailing');
-        final sbId = p['id']?.toString();
-        result = SearchBar(
-          controller: sbId != null ? FlutterControl.text(sbId) : null,
-          focusNode: sbId != null ? FlutterControl.focusNode(sbId) : null,
-          hintText: p.s('hint') ?? p.s('hintText'),
-          leading: p['leading'] != null ? Icon(Props.toIcon(p['leading'])) : null,
-          trailing: trailing.isEmpty ? null : trailing,
-          backgroundColor: p.color('backgroundColor') == null
-              ? null
-              : WidgetStatePropertyAll<Color?>(p.color('backgroundColor')),
-          elevation: p.n('elevation') == null ? null : WidgetStatePropertyAll<double?>(p.n('elevation')),
+        result = BridgeSearchBar(
+          key: _nodeKey(p, path),
+          p: p,
+          trailing: trailing,
           onChanged: (v) => _change(p, v),
           onSubmitted: (v) => _emit(p['onSubmitted'], v, fallback: p.map),
         );
@@ -3005,6 +2997,109 @@ class _BridgeBottomNavState extends State<BridgeBottomNav> {
       unselectedItemColor: widget.unselectedColor,
       onTap: (i) => widget.onTap?.call(i),
       items: _items(),
+    );
+  }
+}
+
+/// 搜索栏（受控）：spec 的 text 变化会同步进 controller；输入只回传事件，
+/// 需要 Lua 侧回写 text 才能让 UI 与 spec 保持一致。
+class BridgeSearchBar extends StatefulWidget {
+  const BridgeSearchBar({
+    super.key,
+    required this.p,
+    required this.trailing,
+    required this.onChanged,
+    required this.onSubmitted,
+  });
+  final Props p;
+  final List<Widget> trailing;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  @override
+  State<BridgeSearchBar> createState() => _BridgeSearchBarState();
+}
+
+class _BridgeSearchBarState extends State<BridgeSearchBar> {
+  late final String? _id = widget.p['id']?.toString();
+  late final TextEditingController _controller = _id != null
+      ? FlutterControl.text(_id!, initial: widget.p.s('text') ?? '')
+      : TextEditingController(text: widget.p.s('text') ?? '');
+  late final FocusNode? _focus = _id != null ? FlutterControl.focusNode(_id!) : null;
+
+  @override
+  void didUpdateWidget(BridgeSearchBar old) {
+    super.didUpdateWidget(old);
+    // 只有 spec 里的 text 真的变了才写 controller（否则会打断正在输入的光标）
+    final next = widget.p.s('text') ?? '';
+    final prev = old.p.s('text') ?? '';
+    if (next != prev && _controller.text != next) {
+      _controller.text = next;
+      _controller.selection = TextSelection.collapsed(offset: next.length);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_id == null) _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    return SearchBar(
+      controller: _controller,
+      focusNode: _focus,
+      hintText: p.s('hint') ?? p.s('hintText'),
+      leading: p['leading'] != null ? Icon(Props.toIcon(p['leading'])) : null,
+      trailing: widget.trailing.isEmpty ? null : widget.trailing,
+      backgroundColor: p.color('backgroundColor') == null
+          ? null
+          : WidgetStatePropertyAll<Color?>(p.color('backgroundColor')),
+      elevation: p.n('elevation') == null ? null : WidgetStatePropertyAll<double?>(p.n('elevation')),
+      onChanged: widget.onChanged,
+      onSubmitted: widget.onSubmitted,
+    );
+  }
+}
+
+/// 带边框的下拉表单字段（受控）：DropdownButtonFormField 的 initialValue 只在首帧生效，
+/// 这里用 ValueKey(_value) 强制重建来反映 spec 的 value 变化。
+class BridgeDropdownForm extends StatefulWidget {
+  const BridgeDropdownForm({super.key, required this.p, required this.onChanged});
+  final Props p;
+  final ValueChanged<String?> onChanged;
+  @override
+  State<BridgeDropdownForm> createState() => _BridgeDropdownFormState();
+}
+
+class _BridgeDropdownFormState extends State<BridgeDropdownForm> {
+  late String? _value = widget.p.s('value');
+
+  @override
+  void didUpdateWidget(BridgeDropdownForm old) {
+    super.didUpdateWidget(old);
+    final next = widget.p.s('value');
+    if (next != old.p.s('value') && next != _value) setState(() => _value = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p;
+    return DropdownButtonFormField<String>(
+      key: ValueKey(_value),
+      initialValue: _value,
+      items: Renderer._dropdownItems(p['items']),
+      onChanged: p.b('enabled', true)
+          ? (v) {
+              setState(() => _value = v);
+              widget.onChanged(v);
+            }
+          : null,
+      decoration: InputDecoration(
+        labelText: Renderer._decText(p, 'labelText'),
+        border: const OutlineInputBorder(),
+      ),
     );
   }
 }
