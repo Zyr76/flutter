@@ -89,6 +89,41 @@ public final class LuaOkHttp {
     private static long cacheSize = 0;
     private static Proxy proxy = null;
     private static boolean trustAll = false;
+    private static final Map<String, List<Cookie>> COOKIE_STORE = new ConcurrentHashMap<String, List<Cookie>>();
+    private static volatile File cookieFile = null;
+
+    private static final CookieJar JAR = new CookieJar() {
+        @Override
+        public void saveFromResponse(HttpUrl url, List<Cookie> cookies) {
+            if (cookies == null || cookies.isEmpty()) {
+                return;
+            }
+            synchronized (COOKIE_STORE) {
+                List<Cookie> old = COOKIE_STORE.get(url.host());
+                List<Cookie> merged = old == null ? new ArrayList<Cookie>() : new ArrayList<Cookie>(old);
+                merged.addAll(cookies);
+                COOKIE_STORE.put(url.host(), merged);
+            }
+            saveCookies();
+        }
+
+        @Override
+        public List<Cookie> loadForRequest(HttpUrl url) {
+            List<Cookie> out = new ArrayList<Cookie>();
+            synchronized (COOKIE_STORE) {
+                List<Cookie> all = COOKIE_STORE.get(url.host());
+                if (all != null) {
+                    for (Cookie c : all) {
+                        if (c.matches(url)) {
+                            out.add(c);
+                        }
+                    }
+                }
+            }
+            return out;
+        }
+    };
+
     private static final Map<String, OkHttpClient> CLIENT_CACHE = new ConcurrentHashMap<String, OkHttpClient>();
 
     private static volatile OkHttpClient CLIENT = buildClient();
@@ -148,40 +183,6 @@ public final class LuaOkHttp {
     }
 
     // ---------- Cookie：内存 + 可选落盘 ----------
-    private static final Map<String, List<Cookie>> COOKIE_STORE = new ConcurrentHashMap<String, List<Cookie>>();
-    private static volatile File cookieFile = null;
-
-    private static final CookieJar JAR = new CookieJar() {
-        @Override
-        public void saveFromResponse(HttpUrl url, List<Cookie> cookies) {
-            if (cookies == null || cookies.isEmpty()) {
-                return;
-            }
-            synchronized (COOKIE_STORE) {
-                List<Cookie> old = COOKIE_STORE.get(url.host());
-                List<Cookie> merged = old == null ? new ArrayList<Cookie>() : new ArrayList<Cookie>(old);
-                merged.addAll(cookies);
-                COOKIE_STORE.put(url.host(), merged);
-            }
-            saveCookies();
-        }
-
-        @Override
-        public List<Cookie> loadForRequest(HttpUrl url) {
-            List<Cookie> out = new ArrayList<Cookie>();
-            synchronized (COOKIE_STORE) {
-                List<Cookie> all = COOKIE_STORE.get(url.host());
-                if (all != null) {
-                    for (Cookie c : all) {
-                        if (c.matches(url)) {
-                            out.add(c);
-                        }
-                    }
-                }
-            }
-            return out;
-        }
-    };
 
     /** 设置 Cookie 落盘文件；传 null 取消。文件已存在时会自动加载。 */
     public static void setCookieFile(String path) {
