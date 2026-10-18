@@ -371,9 +371,29 @@ end)
 - **全局配置**：`ok.setCache(dir, bytes)`、`ok.setProxy(host, port)` / `ok.clearProxy()`、
   `ok.setSslVerify(false)`（仅调试）、`ok.setCookieFile(path)`（Cookie 落盘，存在则自动加载）。
 - **重试**：`opts.retries = 2`，**仅对 GET/HEAD 生效**（POST 重试可能重复提交，默认不做）。
-- **WebSocket**：`local ws = ok.ws("wss://…", { headers = {...}, onOpen = fn, onMessage = fn(文本), onClose = fn(code, reason), onFailure = fn(err) })`；
-  句柄方法 `ws.send(文本)` / `ws.close()` / `ws.cancel()`（Java 对象，用点号）。回调已投递回主线程；
-  自动重连需自己在 `onClose`/`onFailure` 里延时重连。
+- **WebSocket**：
+
+```lua
+local ws = ok.ws("wss://example.com/ws", {
+  headers     = { Authorization = "Bearer xxx" },
+  reconnect   = true, reconnectDelay = 2000, maxReconnectDelay = 30000, -- 可选，自动重连
+  pingInterval = 20, connectTimeout = 15,                                -- 可选，秒
+  onOpen      = function(response) end,          -- response.code() / response.headers()
+  onMessage   = function(data, isBinary) end,    -- 二进制帧 isBinary=true，data 是字节串
+  onClose     = function(code, reason) end,      -- 本端 close() 与对端关闭都会到这里
+  onFailure   = function(err, httpCode) end,     -- 握手失败时 httpCode 是 HTTP 状态码，否则 -1
+  onReconnect = function(delayMs) end,           -- 只在开了 reconnect 时触发
+})
+ws.send("hello")            -- 文本帧
+ws.sendBinary("")     -- 二进制帧（Lua 字节串）
+ws.close()                  -- 正常关闭（1000）
+ws.close(4001, "bye")       -- 自定义关闭码
+print(ws.readyState())      -- connecting / open / closing / closed
+ws.cancel()                 -- 强制中止
+```
+
+> 句柄是 Java 对象，用**点号**调用。`close` 的 `code` 传进 Lua 是浮点（1000.0），
+> 需要整数格式化时用 `math.floor(code)`。
 - **会话**：内置内存 Cookie（按 host 累积），同一进程内跨请求保持登录态；`ok.clearCookies()` 可清空。
 - **日志**：`ok.debug(true)` 打印请求/响应日志；默认关闭，关闭时完全静默。
 - **限制**：响应体超过 8 MB 会直接返回错误（提示改用 `download`），避免 OOM。

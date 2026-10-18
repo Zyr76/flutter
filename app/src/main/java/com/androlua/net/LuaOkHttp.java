@@ -798,56 +798,128 @@ public final class LuaOkHttp {
         return handle;
     }
 
-    /** WebSocket 句柄：send(text) / close() / cancel()。 */
+    /** WebSocket 句柄：send / sendBinary / close / cancel / readyState。 */
     public static final class WsHandle {
         private volatile WebSocket ws;
+        private volatile String state = "connecting";
 
-        void set(WebSocket w) {
-            ws = w;
-        }
+        String url;
+        LuaTable<?, ?> handlers;
+        boolean reconnect;
+        int reconnectDelay = 2000;
+        int maxReconnectDelay = 30000;
+        int pingIntervalSec;
+        int connectTimeoutSec;
+        int attempt;
+        volatile boolean manualClose;
 
         public boolean send(String text) {
             WebSocket w = ws;
-            return w != null && w.send(text);
+            return w != null && w.send(text == null ? "" : text);
+        }
+
+        /** [M1] 发送二进制帧：Lua 字符串按 ISO-8859-1 视为字节串。 */
+        public boolean sendBinary(String data) {
+            WebSocket w = ws;
+            if (w == null) {
+                return false;
+            }
+            byte[] bytes = (data == null ? "" : data).getBytes(Charset.forName("ISO-8859-1"));
+            return w.send(okio.ByteString.of(bytes));
         }
 
         public void close() {
+            close(1000.0, "");
+        }
+
+        /** [M5] 自定义关闭码（Lua 传的是 double）。 */
+        public void close(double code, String reason) {
+            manualClose = true;                     // 主动关闭不触发重连
+            state = "closing";
             WebSocket w = ws;
             if (w != null) {
-                w.close(1000, null);
+                w.close((int) code, reason == null ? "" : reason);
             }
         }
 
         public void cancel() {
+            manualClose = true;
             WebSocket w = ws;
             if (w != null) {
                 w.cancel();
             }
+        }
+
+        /** [M3] 连接状态：connecting / open / closing / closed。 */
+        public String readyState() {
+            return state;
+        }
+
+        void set(WebSocket w) {
+            ws = w;
         }
     }
 
     /**
      * 建立 WebSocket 连接（ws / wss）。
      *
-     * @param url      ws:// 或 wss:// 地址
-     * @param handlers Lua 表：headers / onOpen / onMessage / onClose / onFailure
-     * @return 句柄，可 send / close / cancel
+     * <p>handlers：headers / onOpen / onMessage / onClose / onFailure /
+     * reconnect / reconnectDelay / maxReconnectDelay / pingInterval / connectTimeout
      */
     public static WsHandle ws(String url, LuaTable handlers) {
         if (url == null || url.trim().isEmpty()) {
             throw new IllegalArgumentException("okhttp.ws(url, handlers)：url 必填");
         }
+        HttpUrl u = HttpUrl.parse(url.trim());
+        if (u == null) {
+            throw new IllegalArgumentException("okhttp.ws: url 非法：" + url);
+        }
+        WsHandle handle = new WsHandle();
+        handle.url = u.toString();
+        handle.handlers = handlers;
+        if (handlers != null) {
+            handle.reconnect = bool(handlers, "reconnect", false);
+            Object d = handlers.get("reconnectDelay");
+            if (d instanceof Number) {
+                handle.reconnectDelay = Math.max(200, ((Number) d).intValue());
+            }
+            Object md = handlers.get("maxReconnectDelay");
+            if (md instanceof Number) {
+                handle.maxReconnectDelay = Math.max(handle.reconnectDelay, ((Number) md).intValue());
+            }
+            Object ping = handlers.get("pingInterval");
+            if (ping instanceof Number) {
+                handle.pingIntervalSec = ((Number) ping).intValue();
+            }
+            Object ct = handlers.get("connectTimeout");
+            if (ct instanceof Number) {
+                handle.connectTimeoutSec = ((Number) ct).intValue();
+            }
+        }
+        dial(handle);
+        return handle;
+    }
+
+    private static boolean bool(LuaTable<?, ?> t, String key, boolean def) {
+        Object v = t == null ? null : t.get(key);
+        if (v == null) {
+            return def;
+        }
+        if (v instanceof Boolean) {
+            return (Boolean) v;
+        }
+        return Boolean.parseBoolean(String.valueOf(v));
+    }
+
+    private static void dial(final WsHandle handle) {
         Request.Builder rb;
         try {
-            HttpUrl u = HttpUrl.parse(url.trim());
-            if (u == null) {
-                throw new IllegalArgumentException("url 非法：" + url);
-            }
-            rb = new Request.Builder().url(u);
+            rb = new Request.Builder().url(HttpUrl.parse(handle.url));
         } catch (Exception e) {
-            throw new IllegalArgumentException("okhttp.ws: " + msg(e));
+            wsEmit(handle.handlers, "onFailure", "url 非法：" + msg(e), -1.0);
+            return;
         }
-        Object hs = handlers == null ? null : handlers.get("headers");
+        Object hs = handle.handlers == null ? null : handle.handlers.get("headers");
         if (hs instanceof LuaTable) {
             for (Object o : ((LuaTable<?, ?>) hs).entrySet()) {
                 Map.Entry<?, ?> e = (Map.Entry<?, ?>) o;
@@ -856,34 +928,71 @@ public final class LuaOkHttp {
                 }
             }
         }
-        final LuaTable<?, ?> h = handlers;
-        final WsHandle handle = new WsHandle();
-        final WebSocket ws = CLIENT.newWebSocket(rb.build(), new WebSocketListener() {
+        OkHttpClient client = CLIENT;
+        if (handle.pingIntervalSec > 0 || handle.connectTimeoutSec > 0) {
+            OkHttpClient.Builder cb = CLIENT.newBuilder();
+            if (handle.pingIntervalSec > 0) {
+                cb.pingInterval(handle.pingIntervalSec, TimeUnit.SECONDS);   // [M4]
+            }
+            if (handle.connectTimeoutSec > 0) {
+                cb.connectTimeout(handle.connectTimeoutSec, TimeUnit.SECONDS);  // [M6]
+            }
+            client = cb.build();
+        }
+        handle.state = "connecting";
+        final LuaTable<?, ?> h = handle.handlers;
+        WebSocket ws = client.newWebSocket(rb.build(), new WebSocketListener() {
             @Override
             public void onOpen(WebSocket webSocket, Response response) {
-                wsEmit(h, "onOpen");
+                handle.attempt = 0;
+                handle.state = "open";
+                // [B3] 把握手响应交给 Lua：能看状态码与响应头
+                wsEmit(h, "onOpen", response);
             }
 
             @Override
             public void onMessage(WebSocket webSocket, String text) {
-                wsEmit(h, "onMessage", text);
+                wsEmit(h, "onMessage", text, Boolean.FALSE);      // [B2] 文本
+            }
+
+            @Override
+            public void onMessage(WebSocket webSocket, okio.ByteString bytes) {
+                // [B2] 二进制：ISO-8859-1 无损转成 Lua 字节串，第二个参数为 true
+                byte[] raw = bytes == null ? new byte[0] : bytes.toByteArray();
+                wsEmit(h, "onMessage", new String(raw, Charset.forName("ISO-8859-1")), Boolean.TRUE);
             }
 
             @Override
             public void onClosing(WebSocket webSocket, int code, String reason) {
+                // [B1] 对端要关：回 close frame，真正回调在 onClosed
+                handle.state = "closing";
+                webSocket.close(code, reason == null ? "" : reason);
+            }
+
+            @Override
+            public void onClosed(WebSocket webSocket, int code, String reason) {
+                // [B1] 握手完成才通知 Lua（本端主动 close 也走这里）
+                handle.state = "closed";
                 wsEmit(h, "onClose", (double) code, reason == null ? "" : reason);
+                maybeReconnect(handle);
             }
 
             @Override
             public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                wsEmit(h, "onFailure", msg(t));
+                handle.state = "closed";
+                int code = -1;
+                if (response != null) {
+                    code = response.code();
+                    response.close();                            // [R2] 握手失败也不泄漏连接
+                }
+                wsEmit(h, "onFailure", msg(t), (double) code);   // [R1] 带上 HTTP 状态码
+                maybeReconnect(handle);
             }
         });
         handle.set(ws);
-        return handle;
     }
 
-    /** 把 WebSocket 事件投递到主线程再调 Lua。 */
+    /** 把 WebSocket 事件投递到主线程再调 Lua（args 可为 null 占位，Lua 侧收到 nil）。 */
     private static void wsEmit(final LuaTable<?, ?> handlers, final String name, final Object... args) {
         if (handlers == null) {
             return;
@@ -901,6 +1010,25 @@ public final class LuaOkHttp {
                 }
             }
         });
+    }
+
+    /** [M2] 非主动关闭时按指数退避重连。 */
+    private static void maybeReconnect(final WsHandle handle) {
+        if (!handle.reconnect || handle.manualClose) {
+            return;
+        }
+        final int delay = Math.min(handle.maxReconnectDelay,
+                handle.reconnectDelay * (1 << Math.min(handle.attempt, 6)));
+        handle.attempt++;
+        wsEmit(handle.handlers, "onReconnect", (double) delay);
+        MAIN.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!handle.manualClose) {
+                    dial(handle);
+                }
+            }
+        }, delay);
     }
 
     /** 单文件上传（multipart）。 */
