@@ -127,8 +127,15 @@ function M.删多(space, keys)
   return ObjectBox.removeMany(tostring(space), luajava.createArray("java.lang.String", keys))
 end
 
+--- 释放当前线程的 ObjectBox 线程资源。
+--- thread{} 里用过 objectbox，务必在结尾调用一次，否则事务会在 Finalizer 线程被销毁并报 ERROR。
+function M.关闭线程资源()
+  ObjectBox.closeThreadResources()
+end
+
 M.put, M.get, M.remove, M.keys, M.count, M.clear =
   M.存, M.取, M.删, M.键, M.数量, M.清空
 M.putMany, M.getMany, M.removeMany = M.存多, M.取多, M.删多
+M.closeThreadResources = M.关闭线程资源
 
 return M

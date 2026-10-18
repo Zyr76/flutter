@@ -182,6 +182,18 @@ public final class ObjectBox {
         return ids.size();
     }
 
+    /**
+     * 释放当前线程的 ObjectBox 线程资源（该线程留下的读事务/游标）。
+     *
+     * <p>ObjectBox 的事务是**线程绑定**的：线程用过 box 后若不收尾，事务会落到
+     * Finalizer 线程上去销毁，打出
+     * "Destroying inactive transaction ... in non-owner thread 'Finalizer'" 的 ERROR。
+     * Lua 的 {@code thread{}} 里用过 objectbox 的话，应在结尾调用（Lua 侧 {@code ob.关闭线程资源()}）。
+     */
+    public static void closeThreadResources() {
+        box().getStore().closeThreadResources();
+    }
+
     /** 某个 space 下的全部键。 */
     public static List<String> keys(String space) {
         Query<LuaObject> q = box().query()
