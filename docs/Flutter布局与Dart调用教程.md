@@ -362,6 +362,12 @@ end)
 - **响应类型**：`opts.responseType = "text"`（默认）或 `"bytes"`（二进制按字节串返回）；`opts.charset = "gbk"` 可手动指定解码。
 - **下载 / 上传**：`ok.download(url, path, cb, { timeout = 60000, onProgress = function(rec, total) end })`（流式写文件，进度约 250ms 一次，`total` 未知时为 -1）、`ok.upload(url, "file", path, cb, timeoutMs)`（multipart）。
 - **日志**：`ok.debug(true)` 打印请求/响应；`ok.setLogger(function(level, msg) end)` 自定义输出（可写文件/上报）。
+- **批量并发**：`ok.all({ req1, req2 }, function(results) end)`，全部结束按序回调。
+- **多文件上传**：`ok.uploadMany(url, { {field="img", path="/a.jpg"} }, { token = "x" }, cb)`。
+- **断点续传**：`ok.download(url, path, cb, { resume = true })`（请求 Range，206 时追加写）。
+- **全局配置**：`ok.setCache(dir, bytes)`、`ok.setProxy(host, port)` / `ok.clearProxy()`、
+  `ok.setSslVerify(false)`（仅调试）、`ok.setCookieFile(path)`（Cookie 落盘，存在则自动加载）。
+- **重试**：`opts.retries = 2`，**仅对 GET/HEAD 生效**（POST 重试可能重复提交，默认不做）。
 - **会话**：内置内存 Cookie（按 host 累积），同一进程内跨请求保持登录态；`ok.clearCookies()` 可清空。
 - **日志**：`ok.debug(true)` 打印请求/响应日志；默认关闭，关闭时完全静默。
 - **限制**：响应体超过 8 MB 会直接返回错误（提示改用 `download`），避免 OOM。
