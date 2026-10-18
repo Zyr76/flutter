@@ -633,6 +633,10 @@ public final class LuaOkHttp {
                     }
                     if (left.decrementAndGet() == 0) {
                         deliverAll(callback, slots, n);
+                        // [3] 全部结束后释放子句柄（之后 group.cancel 变成 no-op），避免长期持有 Call
+                        synchronized (children) {
+                            children.clear();
+                        }
                     }
                 }
             });
@@ -803,14 +807,15 @@ public final class LuaOkHttp {
         private volatile WebSocket ws;
         private volatile String state = "connecting";
 
-        String url;
-        LuaTable<?, ?> handlers;
-        boolean reconnect;
-        int reconnectDelay = 2000;
-        int maxReconnectDelay = 30000;
-        int pingIntervalSec;
-        int connectTimeoutSec;
-        int attempt;
+        private volatile String url;
+        private volatile LuaTable<?, ?> handlers;
+        private volatile boolean reconnect;
+        private volatile int reconnectDelay = 2000;
+        private volatile int maxReconnectDelay = 30000;
+        private volatile int maxReconnectAttempts = 0;   // [4] 0 = 不限
+        private volatile int pingIntervalSec;
+        private volatile int connectTimeoutSec;
+        private volatile int attempt;
         volatile boolean manualClose;
 
         public boolean send(String text) {
@@ -887,6 +892,10 @@ public final class LuaOkHttp {
             if (md instanceof Number) {
                 handle.maxReconnectDelay = Math.max(handle.reconnectDelay, ((Number) md).intValue());
             }
+            Object ma = handlers.get("maxReconnectAttempts");
+            if (ma instanceof Number) {
+                handle.maxReconnectAttempts = Math.max(0, ((Number) ma).intValue());
+            }
             Object ping = handlers.get("pingInterval");
             if (ping instanceof Number) {
                 handle.pingIntervalSec = ((Number) ping).intValue();
@@ -941,7 +950,9 @@ public final class LuaOkHttp {
         }
         handle.state = "connecting";
         final LuaTable<?, ?> h = handle.handlers;
-        WebSocket ws = client.newWebSocket(rb.build(), new WebSocketListener() {
+        WebSocket ws;
+        try {
+            ws = client.newWebSocket(rb.build(), new WebSocketListener() {
             @Override
             public void onOpen(WebSocket webSocket, Response response) {
                 handle.attempt = 0;
@@ -988,13 +999,24 @@ public final class LuaOkHttp {
                 wsEmit(h, "onFailure", msg(t), (double) code);   // [R1] 带上 HTTP 状态码
                 maybeReconnect(handle);
             }
-        });
+            });
+        } catch (Exception e) {
+            // [1] client 已关闭 / 内部异常：不能让异常冒到 Lua 调用方或主线程 Runnable
+            handle.state = "closed";
+            wsEmit(handle.handlers, "onFailure", "建立连接失败：" + msg(e), -1.0);
+            maybeReconnect(handle);
+            return;
+        }
         handle.set(ws);
     }
 
     /** 把 WebSocket 事件投递到主线程再调 Lua（args 可为 null 占位，Lua 侧收到 nil）。 */
     private static void wsEmit(final LuaTable<?, ?> handlers, final String name, final Object... args) {
         if (handlers == null) {
+            // [2] 没给 handlers 时也不静默：至少让失败在控制台可见
+            if ("onFailure".equals(name) && args.length > 0) {
+                System.out.println("[okhttp] WebSocket 失败（未提供 handlers）：" + args[0]);
+            }
             return;
         }
         MAIN.post(new Runnable() {
@@ -1015,6 +1037,11 @@ public final class LuaOkHttp {
     /** [M2] 非主动关闭时按指数退避重连。 */
     private static void maybeReconnect(final WsHandle handle) {
         if (!handle.reconnect || handle.manualClose) {
+            return;
+        }
+        // [4] 次数上限：到了就停并通知 onGiveUp
+        if (handle.maxReconnectAttempts > 0 && handle.attempt >= handle.maxReconnectAttempts) {
+            wsEmit(handle.handlers, "onGiveUp", (double) handle.attempt);
             return;
         }
         final int delay = Math.min(handle.maxReconnectDelay,
