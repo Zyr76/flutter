@@ -46,10 +46,15 @@ function M.request(opts, cb)
   end
 
   local req = {
-    method = string.upper(opts.method or "GET"),
+    -- 不写死 GET：给了 form 且没写 method 时由 Java 侧按 POST 处理
+    method = opts.method and string.upper(opts.method) or nil,
     url = opts.url,
     headers = opts.headers,
     timeout = opts.timeout,
+    query = opts.query,               -- [01] { a = "1", b = { "x", "y" } }
+    form = opts.form,                 -- [02] { user = "x" } → x-www-form-urlencoded
+    responseType = opts.responseType, -- [11] text（默认）/ bytes
+    charset = opts.charset,           -- [14] 例如 "gbk"
   }
   if opts.json ~= nil then
     req.body = json.encode(opts.json)
@@ -90,24 +95,38 @@ function M.cancel(call)
 end
 
 --- 流式下载到本地文件。回调结果：{ ok, path, size, error }
-function M.download(url, path, cb)
+--- 第 4 个参数可以是超时（毫秒）或 { timeout=, onProgress= }；
+--- onProgress(received, total) 约 250ms 一次，total 未知时为 -1。
+function M.download(url, path, cb, a, b)
   if type(cb) ~= "function" then
     error("okhttp.download: 需要回调函数", 2)
   end
-  return OkHttp.download(url, path, cb)
+  local timeout, onProgress
+  if type(a) == "table" then
+    timeout, onProgress = a.timeout, a.onProgress
+  else
+    timeout, onProgress = a, b
+  end
+  return OkHttp.download(url, path, cb, timeout or 0, onProgress)
 end
 
---- multipart 上传单个文件。回调结果同 request。
-function M.upload(url, field, filePath, cb)
+--- multipart 上传单个文件。回调结果同 request。[06] 第 5 参数可选超时（毫秒）。
+function M.upload(url, field, filePath, cb, timeoutMs)
   if type(cb) ~= "function" then
     error("okhttp.upload: 需要回调函数", 2)
   end
-  return OkHttp.upload(url, field or "file", filePath, cb)
+  return OkHttp.upload(url, field or "file", filePath, cb, timeoutMs or 0)
 end
 
---- 打开/关闭请求日志（打到 Lua 控制台）。
+--- 打开/关闭请求日志。
 function M.debug(on)
   OkHttp.setDebug(on and true or false)
+end
+
+--- [06] 自定义日志回调：fn(level, msg)。设置后 debug 日志走它，不再 print。
+--- 传 nil 恢复默认（打到 Lua 控制台）。
+function M.setLogger(fn)
+  OkHttp.setLogger(fn)
 end
 
 --- 清空内存 Cookie。
