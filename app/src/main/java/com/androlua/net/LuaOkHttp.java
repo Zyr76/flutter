@@ -975,7 +975,9 @@ public final class LuaOkHttp {
         if (url == null || url.trim().isEmpty()) {
             throw new IllegalArgumentException("okhttp.ws(url, handlers)：url 必填");
         }
-        HttpUrl u = HttpUrl.parse(url.trim());
+        // OkHttp 的 HttpUrl 只接受 http/https；WebSocket 握手用 http(s) 表示，
+        // 所以 ws:// → http://、wss:// → https://（newWebSocket 自己会做升级）
+        HttpUrl u = HttpUrl.parse(wsUrlToHttp(url));
         if (u == null) {
             throw new IllegalArgumentException("okhttp.ws: url 非法：" + url);
         }
@@ -1007,6 +1009,18 @@ public final class LuaOkHttp {
         }
         dial(handle);
         return handle;
+    }
+
+    /** ws:// → http://，wss:// → https://；其余原样返回。 */
+    private static String wsUrlToHttp(String url) {
+        String u = url == null ? "" : url.trim();
+        if (u.regionMatches(true, 0, "ws://", 0, 5)) {
+            return "http://" + u.substring(5);
+        }
+        if (u.regionMatches(true, 0, "wss://", 0, 6)) {
+            return "https://" + u.substring(6);
+        }
+        return u;
     }
 
     private static boolean bool(LuaTable<?, ?> t, String key, boolean def) {
