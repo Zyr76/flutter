@@ -357,7 +357,11 @@ end)
 - 结果表：`ok` / `code` / `body` / `headers`（单值）/ `headersAll`（多值，如多个 `Set-Cookie`）/ `canceled` / `error`；
   `ok.decode(res)` 把 `body` 当 JSON 解析。
 - **取消**：`local call = ok.get(url, cb)` 返回句柄，页面退出时 `ok.cancel(call)`；被取消的请求回调会带 `canceled = true`。
-- **下载 / 上传**：`ok.download(url, path, cb)`（流式写文件，不整体入内存）、`ok.upload(url, "file", path, cb)`（multipart）。
+- **查询参数**：`opts.query = { q = "中文", tag = { "a", "b" } }` 自动 URL 编码；值是数组时同名参数重复添加。
+- **表单**：`opts.form = { user = "x", pass = "y" }` → `x-www-form-urlencoded`；没显式写 `method` 时默认 POST。
+- **响应类型**：`opts.responseType = "text"`（默认）或 `"bytes"`（二进制按字节串返回）；`opts.charset = "gbk"` 可手动指定解码。
+- **下载 / 上传**：`ok.download(url, path, cb, { timeout = 60000, onProgress = function(rec, total) end })`（流式写文件，进度约 250ms 一次，`total` 未知时为 -1）、`ok.upload(url, "file", path, cb, timeoutMs)`（multipart）。
+- **日志**：`ok.debug(true)` 打印请求/响应；`ok.setLogger(function(level, msg) end)` 自定义输出（可写文件/上报）。
 - **会话**：内置内存 Cookie（按 host 累积），同一进程内跨请求保持登录态；`ok.clearCookies()` 可清空。
 - **日志**：`ok.debug(true)` 打印请求/响应日志；默认关闭，关闭时完全静默。
 - **限制**：响应体超过 8 MB 会直接返回错误（提示改用 `download`），避免 OOM。
