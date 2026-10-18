@@ -7,6 +7,8 @@ import java.util.List;
 
 import io.objectbox.Box;
 import io.objectbox.query.Query;
+// ObjectBox 5.x 的字符串条件必须显式指定匹配方式
+import io.objectbox.query.QueryBuilder.StringOrder;
 
 /**
  * ObjectBox 的静态门面：Lua 侧通过 {@code luajava.bindClass("com.androlua.objectbox.ObjectBox")}
@@ -42,9 +44,9 @@ public final class ObjectBox {
 
     private static Query<LuaObject> one(String space, String key) {
         return box().query()
-                .equal(LuaObject_.space, space)
+                .equal(LuaObject_.space, space, StringOrder.CASE_SENSITIVE)
                 .and()
-                .equal(LuaObject_.key, key)
+                .equal(LuaObject_.key, key, StringOrder.CASE_SENSITIVE)
                 .build();
     }
 
@@ -80,7 +82,10 @@ public final class ObjectBox {
 
     /** 某个 space 下的全部键。 */
     public static List<String> keys(String space) {
-        List<LuaObject> list = box().query().equal(LuaObject_.space, space).build().find();
+        List<LuaObject> list = box().query()
+                .equal(LuaObject_.space, space, StringOrder.CASE_SENSITIVE)
+                .build()
+                .find();
         List<String> out = new ArrayList<String>(list.size());
         for (LuaObject o : list) {
             out.add(o.key);
@@ -90,12 +95,17 @@ public final class ObjectBox {
 
     /** 某个 space 下的记录数。 */
     public static long count(String space) {
-        return box().query().equal(LuaObject_.space, space).build().count();
+        return box().query()
+                .equal(LuaObject_.space, space, StringOrder.CASE_SENSITIVE)
+                .build()
+                .count();
     }
 
     /** 清空某个 space，返回删除的条数。 */
     public static long clear(String space) {
-        Query<LuaObject> q = box().query().equal(LuaObject_.space, space).build();
+        Query<LuaObject> q = box().query()
+                .equal(LuaObject_.space, space, StringOrder.CASE_SENSITIVE)
+                .build();
         long n = q.count();
         q.remove();
         return n;
