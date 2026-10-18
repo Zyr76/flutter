@@ -30,6 +30,7 @@
   - [4.1 改属性：`id.dart.属性 = 值`](#41-改属性iddart属性--值)
   - [4.2 与 Dart 通信](#42-与-dart-通信)
   - [4.3 弹窗命令](#43-弹窗命令)
+  - [4.4 HTTP 请求：`okhttp`](#44-http-请求okhttp)
 - [5. 列表](#5-列表)
   - [5.1 懒加载](#51-懒加载)
   - [5.2 列表项里的布局注意](#52-列表项里的布局注意)
@@ -308,7 +309,9 @@ end)
 -- thread(function() local info = dartCall("getUserInfo", { id = 7 }) end)
 ```
 
-内置 Dart 方法：`getUserInfo`、`add`、`toUpper`、`fib`、`now`、`uuid`、`randomInt`、`sleep`、`jsonEncode`/`jsonDecode`、`base64Encode`/`base64Decode`、`httpGet`/`httpPost`、`login`、`fetchOrders`、`saveProfile`。
+内置 Dart 方法：`getUserInfo`、`add`、`toUpper`、`fib`、`now`、`uuid`、`randomInt`、`sleep`、`jsonEncode`/`jsonDecode`、`base64Encode`/`base64Decode`、`login`、`fetchOrders`、`saveProfile`。
+
+> 网络请求**不在** Dart 侧：用 Lua 的 [`okhttp`](#44-http-请求okhttp)（异步、支持 HTTPS）。
 
 > **`thread{}` 是独立的 Lua 状态（新的 LuaState）**：主脚本的全局变量（`hint`、`nativeBtn`、id 句柄…）在那边**全是 nil**，直接访问会报 `attempt to index a nil value`。
 > 所以**不要在 thread 里直接操作主脚本的控件**，优先用上面的异步回调。
@@ -330,6 +333,30 @@ end)
 
 > **`显示对话框` 的 spec 语义**：只给一个子节点时**直接渲染那个节点、不包 `AlertDialog` 外壳**
 > （`显示对话框 { { Text, "hi" } }` 得到的是一行文字）；否则数字键的子节点收进 content、其余键当属性。
+
+### 4.4 HTTP 请求：`okhttp`
+
+```lua
+local ok = require "okhttp"
+
+ok.get("https://api.example.com/ping", function(res)
+  if res.ok then print(res.code, res.body) else print("失败：" .. tostring(res.error)) end
+end)
+
+ok.post("https://api.example.com/login", {
+  headers = { Authorization = "Bearer xxx" },
+  json    = { user = "a", pass = "b" },   -- 自动 JSON 编码
+  timeout = 8000,                          -- 毫秒，按请求生效
+}, function(res)
+  if res.ok and res.code == 200 then print(res.body) end
+end)
+```
+
+- 后端是 **OkHttp**：异步（不阻塞 UI）、**支持 HTTPS**、连接池、每请求超时。
+- **回调在主线程执行**，里面可以安全操作控件。
+- 结果表：`ok` / `code` / `body` / `headers` / `error`；`ok.decode(res)` 把 `body` 当 JSON 解析。
+- 方法：`get` / `post` / `put` / `patch` / `delete` / `head` / 通用 `request{...}`。
+- 对比：`require "http"`（LuaSocket）是**同步**的、**不支持 https**，只适合明文/局域网；脚本里建议一律用 `okhttp`。
 
 ---
 
