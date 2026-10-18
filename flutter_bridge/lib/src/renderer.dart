@@ -1971,7 +1971,7 @@ class Renderer {
       // 用 _tapHandler：既支持 onClick="函数名"，也支持「只给 id、事后用句柄绑 onClick」
       // （原来用 _voidCallback(p['onTap'])，只给 id 时返回 null，卡片/容器点了没反应）
       final cb = _tapHandler(p);
-      final lp = _voidCallback(p['onLongPress'] ?? p['onLongClick'], fallback: p.map);
+      final lp = _voidCallback(p['onLongPress'] ?? p['onLongClick'], fallback: p.map, type: 'longPress');
       if (cb != null || lp != null) out = GestureDetector(onTap: cb, onLongPress: lp, child: out);
     }
     // 通用交互事件层：写了的才包，不影响现有手势竞争
@@ -2456,13 +2456,16 @@ class Renderer {
     }
   }
 
-  static VoidCallback? _voidCallback(dynamic onTap, {Map<String, dynamic>? fallback}) {
+  /// 把 onTap / onLongPress 的声明式写法转成回调。
+  /// type 决定事件里 data.type 的值（Java 侧按它路由到 onClick / onLongPress 等字段），
+  /// 点击默认 'click'，长按必须传 'longPress'，否则句柄的 h.onLongPress 永远不会命中。
+  static VoidCallback? _voidCallback(dynamic onTap, {Map<String, dynamic>? fallback, String type = 'click'}) {
     if (onTap == null) return null;
     final action = onTap;
     return () {
       if (action is String) {
         // 字符串形式：只发事件，事件名 = 该名字（AndroLua 风格：点击调用同名 Lua 函数）
-        FlutterBridge.instance.emit(action, {'action': action, 'type': 'click'});
+        FlutterBridge.instance.emit(action, {'action': action, 'type': type});
       } else if (action is Map) {
         final m = action.cast<String, dynamic>();
         final method = (m['call'] ?? m['method'] ?? '').toString();
@@ -2477,7 +2480,7 @@ class Renderer {
         final event = (m['event'] ?? m['emit'] ?? method).toString();
         FlutterBridge.instance.emit(
           event.isEmpty ? 'onTap' : event,
-          {'action': method, 'args': args, 'result': res, 'type': 'click'},
+          {'action': method, 'args': args, 'result': res, 'type': type},
         );
       }
     };

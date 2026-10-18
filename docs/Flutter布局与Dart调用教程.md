@@ -166,6 +166,23 @@ end
 - 开关/复选/滑动变化：`type="change"`，`e.data.value` 是新值。
 - `onClick = { call = "add", args = {a=3,b=4} }` 形式会调用 Dart 方法并把结果放进 `e.data.result`。
 
+**id 句柄支持的回调字段**（右侧是触发时的事件 `type`，原生按它路由到对应字段）：
+
+| 句柄写法 | 触发时机 | type |
+|---|---|---|
+| `h.onClick` / `h.onTap` | 点击 | `click` |
+| `h.onChange` / `h.onChanged` | 值变化 | `change` |
+| `h.onLongPress` / `h.onLongClick` | 长按 | `longPress` |
+| `h.onTapDown` / `h.onTapUp` / `h.onTapCancel` | 按下 / 抬起 / 取消 | `tapDown` / `tapUp` / `tapCancel` |
+| `h.onDoubleTap` / `h.onSecondaryTap` | 双击 / 次要点按 | `doubleTap` / `secondaryTap` |
+| `h.onHover` / `h.onEnter` / `h.onExit` | 悬停 / 进入 / 离开 | `hover` / `enter` / `exit` |
+| `h.onFocusChange` | 焦点变化 | `focusChange` |
+| `h.onExpansion` / `h.onExpansionChanged` | 展开收起 | `expansion` |
+| `h.onRefresh` | 下拉刷新 | `refresh` |
+| `h.onStepContinue` / `h.onStepCancel` | Stepper 下一步 / 上一步 | `stepContinue` / `stepCancel` |
+
+> 未在这些列表里的 type 一律按 `click` 处理（保持旧脚本兼容）。
+
 ---
 
 ## 4.5 受控控件：属性是唯一真源
