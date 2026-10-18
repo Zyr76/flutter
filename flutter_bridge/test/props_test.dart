@@ -33,11 +33,14 @@ void main() {
     expect(p['color'], isNull);
   });
 
-  test('Props.of 命中缓存（同一 Map 返回同一实例）', () {
+  test('Props.of 不做实例缓存：同一 Map 的原地修改也要反映出来', () {
     final raw = {'type': 'Text', 'text': 'hi'};
     final a = Props.of(raw);
+    raw['text'] = 'changed'; // 原地改（修复前会命中缓存拿到旧值）
     final b = Props.of(raw);
-    expect(identical(a, b), isTrue);
+    expect(a['text'], 'hi');
+    expect(b['text'], 'changed');
+    expect(identical(a, b), isFalse);
   });
 
   test('toDate 支持 ISO 字符串与毫秒时间戳', () {

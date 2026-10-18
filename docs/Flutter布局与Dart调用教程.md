@@ -215,6 +215,25 @@ flutterHandlers()     -- 打印 __flutter_handlers 里已注册的 id 与回调
 
 ---
 
+## 6.6 UI 调试（统一开关）
+
+```lua
+require "flutter"
+flutterUI_debug(true)     -- 打开；传 false 关闭
+```
+
+打开后：
+
+| 能力 | 表现 |
+|---|---|
+| 未知控件名 | 控制台打印 `[Flutter] 未知控件: xxx`，并回传 `flutterUiIssue` 事件；同类只报一次，不会每帧刷屏 |
+| 构建失败 | **只坏那一块**：该节点显示红框占位，其余节点照常渲染（不再整棵树变空白） |
+| Flutter 异常 | 通过 `flutterError` 事件回传，Lua 用 `收到Flutter事件` 接收 |
+
+关闭时（默认）：未知控件静默降级；构建失败该节点渲染为空（不给终端用户看红框），异常照样回传 `flutterError`。
+
+> 属性名目前不会告警（只有控件名会）。另外 `flutterDebug(true)` 仍然是独立的事件日志开关，两者互不影响。
+
 ## 7. 与 Dart 通信
 
 ```lua

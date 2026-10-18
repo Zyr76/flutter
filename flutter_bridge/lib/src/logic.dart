@@ -20,6 +20,12 @@ void registerDefaultHandlers(
   // 统一控制入口：{ id, action, ... }
   handlers['flutterControl'] = FlutterControl.call;
 
+  // UI 调试总开关（未知控件告警 / 错误红框 / 错误事件）
+  handlers['flutterUIDebug'] = (args) {
+    FlutterBridge.instance.setUiDebug(args?['enabled'] == true);
+    return {'ok': true};
+  };
+
   // 需要 Flutter 上下文的抽屉操作
   handlers['openDrawer'] = (args) {
     Renderer.scaffoldKey.currentState?.openDrawer();

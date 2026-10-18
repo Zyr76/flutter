@@ -1594,6 +1594,8 @@ class Renderer {
 
       // ---------- 原生 ----------
       default:
+        // 未知控件名：静默降级（保持向后兼容）；uiDebug 打开时告警一次并回传 Lua
+        FlutterBridge.instance.reportUiIssue('未知控件: ${p.type}');
         if (children.isNotEmpty) {
           result = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
         } else if (p['text'] != null) {

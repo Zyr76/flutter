@@ -3,16 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-/// Props 缓存条目：保存原始对象引用，避免 identityHashCode 碰撞时误用。
-class _PropsCacheEntry {
-  _PropsCacheEntry(this.raw, this.props, this.keyCount);
-  final Object raw;
-  final Props props;
-
-  /// 建缓存时的键数，用于 debug 下断言「同一 Map 实例没被原地改过」。
-  final int keyCount;
-}
-
 /// 属性别名：把 Lua 侧常见别名统一到规范键。规范的 Flutter 属性名保持不变。
 const Map<String, String> kPropAliases = {
   // 回调
@@ -48,43 +38,11 @@ class Props {
 
   final Map<String, dynamic> map;
 
-  /// Props 缓存：normalize 要新建 Map 并拷贝所有键，是每节点每次 render 的热路径。
-  /// 用 identityHashCode 作 key，并校验 raw 仍是同一对象（防 hash 碰撞）——
-  /// 只要调用方不修改传入的 Map（渲染器只读），缓存就是安全的。
-  static final Map<int, _PropsCacheEntry> _cache = {};
-  static const int _cacheLimit = 512;
-
-  static Props of(dynamic raw) {
-    if (raw is Map) {
-      final id = identityHashCode(raw);
-      final hit = _cache[id];
-      if (hit != null && identical(hit.raw, raw)) {
-        assert(
-          hit.keyCount == raw.length,
-          'Props.of: 传入的 Map 被原地修改过（键数变了）。同一实例必须保持内容不变，'
-          '否则会命中缓存里的旧属性；改属性请换一个新 Map。',
-        );
-        // 命中时挪到末尾：热点条目不会被误踢（Map 按插入序迭代，这就是真 LRU）
-        _cache.remove(id);
-        _cache[id] = hit;
-        return hit.props;
-      }
-      final props = Props._(normalize(raw));
-      _cache[id] = _PropsCacheEntry(raw, props, raw.length);
-      if (_cache.length > _cacheLimit) {
-        // 超出上限就丢最早的一批（LRU：最少使用的在后面）
-        final drop = _cache.keys.take(_cache.length - _cacheLimit).toList();
-        for (final k in drop) {
-          _cache.remove(k);
-        }
-      }
-      return props;
-    }
-    return Props._(normalize(raw));
-  }
-
-  /// 清空缓存（测试或需要强制重解析时用）。
-  static void clearCache() => _cache.clear();
+  /// 不做实例缓存：以前按 identityHashCode 缓存 Props，同一 Map 实例第二次直接返回旧对象。
+  /// 但缓存察觉不到「Map 被原地改过」（值变了、键数没变），release 下会悄悄用旧属性，
+  /// 表现就是“改了没反应”。normalize 只是一次 Map 拷贝（每节点每次构建一次），
+  /// 用这点开销换正确性是划算的。
+  static Props of(dynamic raw) => Props._(normalize(raw));
 
   /// 兼容两种节点写法，并把别名键写回规范键。
   ///

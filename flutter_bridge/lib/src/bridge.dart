@@ -53,6 +53,25 @@ class FlutterBridge {
   /// dartCall 的逻辑方法表：名字 -> 函数(参数 map) -> 可 JSON 序列化的返回值。
   final Map<String, dynamic Function(Map<String, dynamic>? args)> handlers = {};
 
+  /// UI 调试总开关（Lua 侧 `flutterUI_debug(true)` 打开）。
+  /// 开启后：未知控件告警、构建错误显示红框、Flutter 异常回传 Lua。
+  bool uiDebug = false;
+
+  void setUiDebug(bool on) {
+    uiDebug = on;
+    debugPrint('[Flutter] UI 调试已${on ? "开启" : "关闭"}');
+  }
+
+  /// 已上报过的问题（同类只报一次，避免每帧刷屏）。
+  final Set<String> _reportedIssues = {};
+
+  /// 上报一条 UI 侧问题（未知控件等）：仅 uiDebug 打开时生效，同类只报一次。
+  void reportUiIssue(String message) {
+    if (!uiDebug || !_reportedIssues.add(message)) return;
+    debugPrint('[Flutter] $message');
+    emit('flutterUiIssue', {'message': message});
+  }
+
   /// 原生主动推来的事件监听：事件名 -> 回调列表（同名事件可多个监听，不再互相覆盖）。
   final Map<String, List<void Function(dynamic data)>> eventListeners = {};
 
@@ -61,6 +80,14 @@ class FlutterBridge {
   void start() {
     if (_started) return;
     _started = true;
+    // 错误边界：单个节点构建失败只坏那一块，不再让整棵树变空白。
+    // uiDebug 关闭时渲染成空占位（不给终端用户看红框），但异常照样回传 Lua。
+    ErrorWidget.builder = (d) =>
+        uiDebug ? _uiErrorBox(d) : const SizedBox.shrink();
+    FlutterError.onError = (d) {
+      FlutterError.presentError(d);
+      emit('flutterError', {'message': d.exceptionAsString()});
+    };
     registerDefaultHandlers(handlers);
     channel.setMethodCallHandler(_onMethodCall);
     // 告诉原生：Dart 侧通道已就绪。引擎启动初期通道缓冲有限（见 ChannelBuffers），
@@ -338,4 +365,24 @@ class FlutterBridge {
       eventListeners[name]?.remove(listener);
     }
   }
+}
+
+/// 构建失败时的红框占位（只在 uiDebug 打开时使用）。
+Widget _uiErrorBox(FlutterErrorDetails d) {
+  final msg = d.exceptionAsString();
+  final short = msg.length > 200 ? '${msg.substring(0, 200)}…' : msg;
+  return Directionality(
+    textDirection: TextDirection.ltr,
+    child: Container(
+      margin: const EdgeInsets.all(2),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFDE7E9),
+        border: Border.all(color: const Color(0xFFE53935)),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text('渲染错误：$short',
+          style: const TextStyle(color: Color(0xFFB71C1C), fontSize: 11)),
+    ),
+  );
 }

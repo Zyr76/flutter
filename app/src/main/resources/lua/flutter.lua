@@ -10,6 +10,17 @@
 
 _G.__flutter_loaded = true
 
+-- 统一 UI 调试开关：flutterUI_debug(true) 打开后
+--   * 未知控件/属性名会打日志并通过 flutterUiIssue 事件回传（同类只报一次）
+--   * 构建失败显示红框占位（关闭时渲染成空，异常仍通过 flutterError 事件回传）
+--   * Flutter 层异常通过 flutterError 事件回传
+function flutterUI_debug(on)
+  on = not not on
+  _G.__flutter_ui_debug = on
+  调用Dart("flutterUIDebug", { enabled = on })
+  return on
+end
+
 -- 顺手把常用接口收成一个表，方便 require 后按名取用
 return {
   render      = 渲染Flutter,        -- 渲染Flutter(spec [, 容器])
@@ -25,5 +36,6 @@ return {
   pickTime    = 选择时间,
   closeDialog = 关闭对话框,
   debug       = flutterDebug,       -- flutterDebug(true) 打开事件日志
+  uiDebug     = flutterUI_debug,    -- flutterUI_debug(true) 统一 UI 调试开关
   handlers    = flutterHandlers,    -- 打印已注册的 id 与回调
 }
