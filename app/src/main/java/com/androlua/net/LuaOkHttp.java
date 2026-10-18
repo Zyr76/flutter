@@ -70,6 +70,8 @@ public final class LuaOkHttp {
 
     private static final MediaType TEXT = MediaType.parse("text/plain; charset=utf-8");
     private static final MediaType OCTET = MediaType.parse("application/octet-stream");
+    /** P3-10：Lua 字节串与 Java 字符串之间的一一映射编码。 */
+    private static final Charset ISO_8859_1 = Charset.forName("ISO-8859-1");
     private static final long MAX_IN_MEMORY = 8L * 1024 * 1024;
 
     private static volatile boolean DEBUG = false;
@@ -77,15 +79,17 @@ public final class LuaOkHttp {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
-    /** P3-10：主线程还有未处理的进度回调时跳过新投递，避免回调慢时主线程积压。 */
-    private static final AtomicBoolean PROGRESS_PENDING = new AtomicBoolean(false);
+    /** P1-2：进度节流门闩改为「每个下载一份」，避免多任务互相阻塞。 */
+    private static final class ProgressGate {
+        final AtomicBoolean pending = new AtomicBoolean(false);
+    }
 
     // ---------- 可重建的客户端组件（cache / proxy / ssl）----------
     private static File cacheDir = null;
     private static long cacheSize = 0;
     private static Proxy proxy = null;
     private static boolean trustAll = false;
-    private static final Map<Integer, OkHttpClient> CLIENT_CACHE = new ConcurrentHashMap<Integer, OkHttpClient>();
+    private static final Map<String, OkHttpClient> CLIENT_CACHE = new ConcurrentHashMap<String, OkHttpClient>();
 
     private static volatile OkHttpClient CLIENT = buildClient();
 
@@ -270,8 +274,7 @@ public final class LuaOkHttp {
                 }
             }
             w.flush();
-            w.close();
-            w = null;
+            w.close();      // #7：置 null 放到 finally，close 抛异常时也不会重复 close
             if (Build.VERSION.SDK_INT >= 26) {
                 try {
                     java.nio.file.Files.move(tmp.toPath(), f.toPath(),
@@ -295,6 +298,7 @@ public final class LuaOkHttp {
                     w.close();
                 } catch (IOException ignored) {
                 }
+                w = null;
             }
         }
     }
@@ -332,8 +336,19 @@ public final class LuaOkHttp {
     }
 
     // ---------- 核心：统一的执行与结果投递 ----------
+    /** #1：响应快照——Response 在工作线程读完就关，不再跨线程传递。 */
+    private static final class Snapshot {
+        final int code;
+        final okhttp3.Headers headers;
+
+        Snapshot(int code, okhttp3.Headers headers) {
+            this.code = code;
+            this.headers = headers;
+        }
+    }
+
     private interface Sink {
-        void done(Response response, String body, String error, boolean canceled);
+        void done(Snapshot snapshot, String body, String error, boolean canceled);
     }
 
     /**
@@ -369,7 +384,7 @@ public final class LuaOkHttp {
         if (timeoutMs <= 0) {
             return CLIENT;
         }
-        int cacheKey = timeoutMs * 2 + (forDownload ? 1 : 0);   // P3-12：负数不参与，避免与普通请求撞 key
+        String cacheKey = timeoutMs + (forDownload ? ":download" : ":request");   // #5：语义自明
         OkHttpClient cached = CLIENT_CACHE.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -454,8 +469,8 @@ public final class LuaOkHttp {
                 realMethod = "POST";
             }
             if (!bodyText.isEmpty()) {
-                // P1-4：两者同时给时 body 会被忽略，明确报出来而不是静默丢弃
-                emitLog(null, "error", "form 与 body 同时存在，body 被忽略");
+                // #4：两者同时给属于调用方误用，直接报错而不是静默丢弃 body
+                throw new IOException("form 与 body 不能同时使用，请只用其中一个");
             }
             String kv = (formLog == null || formLog.length() == 0)
                     ? ""
@@ -479,16 +494,26 @@ public final class LuaOkHttp {
             return "";
         }
         long len = b.contentLength();
-        if (len > MAX_IN_MEMORY) {
-            throw new IOException("响应体过大（" + len + " 字节，上限 " + MAX_IN_MEMORY + "），请用 ok.download");
-        }
         String rt = str(opts, "responseType", "text").toLowerCase();
+        // P3-8：bytes 模式常用于把图片/二进制读进内存，上限放宽到 32MB；
+        // 也可用 opts.maxBytes 自定（字节）
+        long limit = "bytes".equals(rt) ? 32L * 1024 * 1024 : MAX_IN_MEMORY;
+        Object mb = opts == null ? null : opts.get("maxBytes");
+        if (mb instanceof Number) {
+            long v = ((Number) mb).longValue();      // P2-4：用 long，避免 int 截断
+            if (v > 0) {
+                limit = Math.min(v, 64L * 1024 * 1024);   // 硬上限 64MB，防 OOM
+            }
+        }
+        if (len > limit) {
+            throw new IOException("响应体过大（" + len + " 字节，上限 " + limit + "），可用 opts.maxBytes 调整或改用 ok.download");
+        }
         Object cs = opts == null ? null : opts.get("charset");
         Charset charset;
         if ("bytes".equals(rt)) {
             // P1-3：返回的 String 是"字节按 ISO-8859-1 一一映射"的结果。
             // Lua 侧必须用 string.byte / string.char 逐字节还原，不能当 UTF-8 文本处理。
-            charset = Charset.forName("ISO-8859-1");
+            charset = ISO_8859_1;
         } else if (cs != null) {
             charset = Charset.forName(String.valueOf(cs));
         } else {
@@ -498,6 +523,7 @@ public final class LuaOkHttp {
             charset = declared == null ? Charset.forName("UTF-8") : declared;
         }
         // 边读边计数：chunked（contentLength = -1）时也能拦住超限，避免整体 OOM
+        // P3-8：len <= limit <= 64MB，这里强转 int 安全；chunked（-1）时用默认容量
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(
                 len > 0 ? (int) len : 8192);
         InputStream in = b.byteStream();
@@ -506,8 +532,8 @@ public final class LuaOkHttp {
         int n;
         while ((n = in.read(buf)) != -1) {
             total += n;
-            if (total > MAX_IN_MEMORY) {
-                throw new IOException("响应体过大（已读 " + total + " 字节，上限 " + MAX_IN_MEMORY + "），请用 ok.download");
+            if (total > limit) {
+                throw new IOException("响应体过大（已读 " + total + " 字节，上限 " + limit + "），可用 opts.maxBytes 调整或改用 ok.download");
             }
             bos.write(buf, 0, n);
         }
@@ -517,8 +543,8 @@ public final class LuaOkHttp {
     /**
      * 执行一次请求（含重试），结果交给 sink。返回可取消句柄。
      *
-     * <p>P2-6 契约：同步失败（url 非法、构造失败）一律返回 null **且不调用 sink**，
-     * 失败信息已写入调用方需自取的路径；all() 依赖这一点，勿改成"同步也回调 sink"。
+     * <p>契约：同步失败（url 为空、构造失败）返回 null，**但会同步调用一次 sink** 告知错误；
+     * all() 依赖这一点（先填 slots 再 left--），勿改成静默失败不调 sink。
      */
     private static Handle exec(final LuaTable opts, final Sink sink) {
         final String tag = UUID.randomUUID().toString().substring(0, 8);
@@ -595,7 +621,10 @@ public final class LuaOkHttp {
                 if (DEBUG) {
                     log(null, "info", tag + " ← " + response.code() + " " + response.request().url());
                 }
-                sink.done(response, text, null, false);
+                // #1：快照后立即关闭，连接不等 Lua 回调
+                Snapshot snap = new Snapshot(response.code(), response.headers());
+                response.close();
+                sink.done(snap, text, null, false);
             }
         });
     }
@@ -611,8 +640,8 @@ public final class LuaOkHttp {
         }
         return exec(opts, new Sink() {
             @Override
-            public void done(Response response, String body, String error, boolean canceled) {
-                deliver(callback, response, body, error, canceled);
+            public void done(Snapshot snapshot, String body, String error, boolean canceled) {
+                deliver(callback, snapshot, body, error, canceled);
             }
         });
     }
@@ -655,20 +684,17 @@ public final class LuaOkHttp {
             final int idx = i;
             Handle child = exec((LuaTable) item, new Sink() {
                 @Override
-                public void done(Response response, String body, String error, boolean canceled) {
+                public void done(Snapshot snapshot, String body, String error, boolean canceled) {
                     Result r = new Result();
-                    if (response == null) {
+                    if (snapshot == null) {
                         r.error = error;
                         r.canceled = canceled;
                     } else {
                         r.ok = true;
-                        r.code = response.code();
+                        r.code = snapshot.code;
                         r.body = body;
                     }
                     slots[idx] = r;
-                    if (response != null) {
-                        response.close();
-                    }
                     if (left.decrementAndGet() == 0) {
                         deliverAll(callback, slots, n);
                         // [3] 全部结束后释放子句柄（之后 group.cancel 变成 no-op），避免长期持有 Call
@@ -678,6 +704,8 @@ public final class LuaOkHttp {
                     }
                 }
             });
+            // P2-6：child == null 是正常路径——exec 同步失败时会**同步调用过 sink**
+            // （slots[idx] 已填、left 已减），这里不加入 children 是正确的
             if (child != null) {
                 synchronized (children) {
                     children.add(child);
@@ -794,13 +822,17 @@ public final class LuaOkHttp {
                     return;
                 }
                 final long base = appending ? offset : 0;   // P2-9
+                // P2-5：gate 与本次 onResponse 生命周期绑定（download 目前无重试，
+                // 若将来给 download 加重试，需把 gate 提到方法外层复用）
+                final ProgressGate gate = new ProgressGate();
                 long total = base;
                 long lastPost = 0;
-                long expected = response.body() == null ? -1 : response.body().contentLength();
+                final ResponseBody rb0 = response.body();       // #6：只取一次
+                long expected = rb0 == null ? -1 : rb0.contentLength();
                 if (expected > 0) {
                     expected += base;
                 }
-                try (ResponseBody b = response.body();
+                try (ResponseBody b = rb0;
                      InputStream in = b == null ? null : b.byteStream();
                      OutputStream os = new FileOutputStream(out, appending)) {
                     if (in == null) {
@@ -823,14 +855,15 @@ public final class LuaOkHttp {
                         total += n;
                         long now = System.currentTimeMillis();
                         if (onProgress != null && now - lastPost >= 250
-                                && PROGRESS_PENDING.compareAndSet(false, true)) {
+                                && gate.pending.compareAndSet(false, true)) {
                             lastPost = now;
-                            reportProgress(onProgress, total, expected);
+                            reportProgress(onProgress, total, expected, gate);
                         }
                     }
-                    // P3-2：收尾进度只在"最后一次不是刚刚才报过"时补，避免连着两次
-                    if (onProgress != null && System.currentTimeMillis() - lastPost >= 50) {
-                        reportProgress(onProgress, total, expected);
+                    // P1-1：收尾进度走与主循环相同的串行通道——CAS 到就投递，没 CAS 到
+                    // 说明上一帧回调还在主线程排队，不再补发（避免两帧乱序）。
+                    if (onProgress != null && gate.pending.compareAndSet(false, true)) {
+                        reportProgress(onProgress, total, expected, gate);
                     }
                 } catch (IOException e) {
                     deliver(callback, null, null, "写入失败：" + msg(e), false);
@@ -875,16 +908,17 @@ public final class LuaOkHttp {
         /**
          * [M1] 发送二进制帧。
          *
-         * <p>P1-4：data 必须是**原始字节串**（Lua 侧用 string.char 构造）。
-         * 若传入含 >0xFF 字符的文本（如中文），ISO-8859-1 编码会把它们替换成 '?'，
-         * 数据会静默损坏——文本请用 send()。
+         * <p>data 必须是**原始字节串**（Lua 侧用 string.char 构造）；含 >0xFF 的文本
+         * （如中文）经 ISO-8859-1 会变成 '?' 且静默损坏——文本请用 {@link #send(String)}。
+         *
+         * <p>返回 false 只代表未连接或队列拒收，用 {@link #readyState()} 区分原因。
          */
         public boolean sendBinary(String data) {
             WebSocket w = ws;
             if (w == null) {
                 return false;
             }
-            byte[] bytes = (data == null ? "" : data).getBytes(Charset.forName("ISO-8859-1"));
+            byte[] bytes = (data == null ? "" : data).getBytes(ISO_8859_1);
             return w.send(okio.ByteString.of(bytes));
         }
 
@@ -901,12 +935,14 @@ public final class LuaOkHttp {
                 c = 1000;                           // P1-6：非法关闭码归一
             }
             WebSocket w = ws;
-            if (w != null) {
-                try {
-                    w.close(c, reason == null ? "" : reason);
-                } catch (Exception e) {
-                    wsEmit(handlers, "onFailure", "close 失败：" + msg(e), -1.0);
-                }
+            if (w == null) {
+                state = "closed";       // #3：连接还没建立，不会有 onClosed，别让 readyState 卡在 closing
+                return;
+            }
+            try {
+                w.close(c, reason == null ? "" : reason);
+            } catch (Exception e) {
+                wsEmit(handlers, "onFailure", "close 失败：" + msg(e), -1.0);
             }
         }
 
@@ -1023,7 +1059,11 @@ public final class LuaOkHttp {
                 // P0-2：wsEmit 异步投递，裸 Response 到回调执行时可能已失效，只传快照
                 LuaTable<Object, Object> info = null;
                 try {
-                    LuaState L0 = h == null ? null : h.getLuaState();
+                    // P1-3：优先从 onOpen 这个 Lua 函数本身取状态，比从表上取更可靠
+                    Object fn0 = h == null ? null : h.get("onOpen");
+                    LuaState L0 = fn0 instanceof LuaObject
+                            ? ((LuaObject) fn0).getLuaState()
+                            : (h == null ? null : h.getLuaState());
                     if (L0 != null) {
                         info = new LuaTable<Object, Object>(L0);
                         info.put("code", (double) response.code());
@@ -1031,12 +1071,15 @@ public final class LuaOkHttp {
                         LuaTable<Object, Object> h2 = new LuaTable<Object, Object>(L0);
                         for (String name : response.headers().names()) {
                             List<String> vs = response.headers(name);
-                            h1.put(name, vs.isEmpty() ? "" : vs.get(0));
+                            String v0 = vs.isEmpty() ? "" : vs.get(0);
+                            h1.put(name, v0);
+                            h1.put(name.toLowerCase(), v0);      // P3-7：与 deliver 一致
                             LuaTable<Object, Object> list = new LuaTable<Object, Object>(L0);
                             for (int i = 0; i < vs.size(); i++) {
                                 list.put((double) (i + 1), vs.get(i));
                             }
                             h2.put(name, list);
+                            h2.put(name.toLowerCase(), list);
                         }
                         info.put("headers", h1);
                         info.put("headersAll", h2);
@@ -1055,7 +1098,7 @@ public final class LuaOkHttp {
             public void onMessage(WebSocket webSocket, okio.ByteString bytes) {
                 // [B2] 二进制：ISO-8859-1 无损转成 Lua 字节串，第二个参数为 true
                 byte[] raw = bytes == null ? new byte[0] : bytes.toByteArray();
-                wsEmit(h, "onMessage", new String(raw, Charset.forName("ISO-8859-1")), Boolean.TRUE);
+                wsEmit(h, "onMessage", new String(raw, ISO_8859_1), Boolean.TRUE);
             }
 
             @Override
@@ -1227,7 +1270,10 @@ public final class LuaOkHttp {
                     deliver(callback, null, null, "读取响应失败：" + msg(e), false);
                     return;
                 }
-                deliver(callback, response, text, null, false);
+                // #1：先快照再关闭，Lua 回调里不再持有 Response
+                Snapshot snap = new Snapshot(response.code(), response.headers());
+                response.close();
+                deliver(callback, snap, text, null, false);
             }
         });
         return handle;
@@ -1315,7 +1361,8 @@ public final class LuaOkHttp {
         });
     }
 
-    private static void reportProgress(final LuaObject onProgress, final long received, final long total) {
+    private static void reportProgress(final LuaObject onProgress, final long received, final long total,
+                                       final ProgressGate gate) {
         MAIN.post(new Runnable() {
             @Override
             public void run() {
@@ -1324,14 +1371,17 @@ public final class LuaOkHttp {
                 } catch (Exception e) {
                     emitLog(null, "error", "进度回调出错：" + msg(e));   // P3-3
                 } finally {
-                    PROGRESS_PENDING.set(false);                        // P3-10 放行下一次
+                    // P3-11：gate 可为 null（表示"不做节流"的调用方），当前唯一调用方都传非 null
+                    if (gate != null) {
+                        gate.pending.set(false);                        // 放行本下载的下一次
+                    }
                 }
             }
         });
     }
 
     /** 回到主线程调用 Lua；response 为 null 表示失败。 */
-    private static void deliver(final LuaObject callback, final Response response,
+    private static void deliver(final LuaObject callback, final Snapshot snapshot,
                                 final String body, final String error, final boolean canceled) {
         MAIN.post(new Runnable() {
             @Override
@@ -1339,7 +1389,7 @@ public final class LuaOkHttp {
                 try {
                     final LuaState L = callback.getLuaState();
                     LuaTable<String, Object> t = new LuaTable<String, Object>(L);
-                    if (response == null) {
+                    if (snapshot == null) {
                         t.put("ok", Boolean.FALSE);
                         t.put("error", error);
                         if (canceled) {
@@ -1347,12 +1397,12 @@ public final class LuaOkHttp {
                         }
                     } else {
                         t.put("ok", Boolean.TRUE);
-                        t.put("code", (double) response.code());
+                        t.put("code", (double) snapshot.code);
                         t.put("body", body == null ? "" : body);
                         LuaTable<String, Object> h = new LuaTable<String, Object>(L);
                         LuaTable<Object, Object> all = new LuaTable<Object, Object>(L);
-                        for (String name : response.headers().names()) {
-                            List<String> values = response.headers(name);
+                        for (String name : snapshot.headers.names()) {
+                            List<String> values = snapshot.headers.values(name);
                             String v0 = values.isEmpty() ? "" : values.get(0);
                             h.put(name, v0);
                             h.put(name.toLowerCase(), v0);
@@ -1361,20 +1411,10 @@ public final class LuaOkHttp {
                                 list.put((double) (i + 1), values.get(i));
                             }
                             all.put(name, list);
-                        }
-                        // P2-7：headers 与 headersAll 都提供小写 key，保持一致
-                        for (String name : response.headers().names()) {
-                            List<String> vs = response.headers(name);
-                            LuaTable<Object, Object> list = new LuaTable<Object, Object>(L);
-                            for (int i = 0; i < vs.size(); i++) {
-                                list.put((double) (i + 1), vs.get(i));
-                            }
-                            all.put(name, list);
                             all.put(name.toLowerCase(), list);
                         }
                         t.put("headers", h);
                         t.put("headersAll", all);
-                        response.close();
                     }
                     callback.call(t);
                 } catch (Exception e) {
