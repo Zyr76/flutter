@@ -1,5 +1,6 @@
 package com.androlua.flutter;
 
+import java.util.HashMap;
 import android.os.Looper;
 import android.util.Log;
 import android.view.View;
@@ -600,6 +601,34 @@ public final class FlutterLuaBridge {
     }
 
     /** 把事件分发给对应 id 句柄上注册的回调（onClick / onChange）。返回是否真的调用了回调。 */
+    /**
+     * 事件类型 -> id 句柄上可用的回调字段名（按优先级）。
+     *
+     * <p>type 取自 renderer.dart 的 _emit(..., type: ...)；未列出的类型回落到 click。
+     * longPress / stepContinue / stepCancel 目前 Dart 侧还没有对应 type，
+     * 预留在这里，等对应控件开始发这些类型时直接生效。
+     */
+    private static final Map<String, String[]> TYPE_KEYS = new HashMap<String, String[]>();
+
+    static {
+        TYPE_KEYS.put("change", new String[]{"onChange", "onChanged"});
+        TYPE_KEYS.put("tapDown", new String[]{"onTapDown"});
+        TYPE_KEYS.put("tapUp", new String[]{"onTapUp"});
+        TYPE_KEYS.put("tapCancel", new String[]{"onTapCancel"});
+        TYPE_KEYS.put("doubleTap", new String[]{"onDoubleTap"});
+        TYPE_KEYS.put("secondaryTap", new String[]{"onSecondaryTap"});
+        TYPE_KEYS.put("longPress", new String[]{"onLongPress", "onLongClick"});
+        TYPE_KEYS.put("hover", new String[]{"onHover"});
+        TYPE_KEYS.put("enter", new String[]{"onEnter"});
+        TYPE_KEYS.put("exit", new String[]{"onExit"});
+        TYPE_KEYS.put("focusChange", new String[]{"onFocusChange"});
+        TYPE_KEYS.put("expansion", new String[]{"onExpansion", "onExpansionChanged"});
+        TYPE_KEYS.put("refresh", new String[]{"onRefresh"});
+        TYPE_KEYS.put("stepContinue", new String[]{"onStepContinue"});
+        TYPE_KEYS.put("stepCancel", new String[]{"onStepCancel"});
+        TYPE_KEYS.put("click", new String[]{"onClick", "onTap", "click"});
+    }
+
     private static boolean dispatchNodeHandler(LuaState L, String id, JSONObject event) throws LuaException {
         LuaObject handlers = L.getLuaObject("__flutter_handlers");
         if (handlers == null || !handlers.isTable()) {
@@ -612,9 +641,10 @@ public final class FlutterLuaBridge {
         // 事件类型在 data 里（事件包是 {name, data}），不能在顶层取
         JSONObject data = event.optJSONObject("data");
         String type = data == null ? "" : data.optString("type", "");
-        String[] keys = "change".equals(type)
-                ? new String[]{"onChange", "onChanged"}
-                : new String[]{"onClick", "onTap", "click"};
+        String[] keys = TYPE_KEYS.get(type);
+        if (keys == null) {
+            keys = TYPE_KEYS.get("click");
+        }
         for (String k : keys) {
             LuaObject fn = entry.getField(k);
             if (fn != null && fn.isFunction()) {
