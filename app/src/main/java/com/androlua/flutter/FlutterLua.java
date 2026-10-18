@@ -94,10 +94,6 @@ public class FlutterLua {
 
         engine = sEngineGroup.createAndRunEngine(app, entrypoint);
 
-        engine.getPlatformViewsController().getRegistry()
-                .registerViewFactory("androlua/video",
-                        new VideoViewFactory(engine.getDartExecutor().getBinaryMessenger()));
-
         channel = new MethodChannel(engine.getDartExecutor().getBinaryMessenger(), CHANNEL);
         channel.setMethodCallHandler(this::handleDartCall);
 

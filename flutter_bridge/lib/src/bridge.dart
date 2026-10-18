@@ -33,9 +33,6 @@ class FlutterBridge {
   /// 渲染尚未到达时先存下的补丁（render 一到就补）。
   final List<MapEntry<String, dynamic>> _pendingPatches = [];
 
-  /// 给 Flutter 里嵌的原生视频播放器（VideoView）用的通道。
-  static const MethodChannel videoChannel = MethodChannel('androlua/video');
-
   /// 当前渲染的 widget 树描述（JSON 字符串），由原生 `render` 写入。
   ///
   /// 用「同值也通知」的 notifier：整页重渲染时如果新 JSON 与上一次完全相同
@@ -65,38 +62,12 @@ class FlutterBridge {
     if (_started) return;
     _started = true;
     registerDefaultHandlers(handlers);
-    _registerVideoHandlers();
     channel.setMethodCallHandler(_onMethodCall);
-    videoChannel.setMethodCallHandler(_onVideoCall);
     // 告诉原生：Dart 侧通道已就绪。引擎启动初期通道缓冲有限（见 ChannelBuffers），
     // 过早连发多条消息会把先发的挤掉（典型：render 被后面的 patch 顶掉，界面变占位）。
     channel.invokeMethod<void>('ready').catchError((Object _) {});
   }
 
-  /// 视频播放器控制（供 Lua 通过 dartCall 调用）。
-  void _registerVideoHandlers() {
-    handlers['videoLoad'] = (a) {
-      video('load', a?['url']);
-      return {'ok': true};
-    };
-    handlers['videoPlay'] = (a) {
-      video('play');
-      return {'ok': true};
-    };
-    handlers['videoPause'] = (a) {
-      video('pause');
-      return {'ok': true};
-    };
-    handlers['videoSeek'] = (a) {
-      video('seek', (a?['pos'] as num?)?.toInt() ?? 0);
-      return {'ok': true};
-    };
-    handlers['videoSeekPercent'] = (a) {
-      final pct = (a?['percent'] ?? a?['value']) as num?;
-      video('seekPercent', pct?.toInt() ?? 0);
-      return {'ok': true};
-    };
-  }
 
   /// 命令式弹窗的 spec 容错：
   ///  * 没写 type（如 `flutterShowDialog{ title=..., { Text,... } }`）→ 当 AlertDialog，
@@ -124,17 +95,6 @@ class FlutterBridge {
       out['content'] = kids.length == 1 ? kids.first : <String, dynamic>{'type': 'Column', 'children': kids};
     }
     return out;
-  }
-
-  /// 向原生视频播放器发指令。
-  void video(String method, [dynamic args]) {
-    videoChannel.invokeMethod<void>(method, args);
-  }
-
-  /// 原生视频播放器回传的事件（prepared / completion / error）。
-  Future<dynamic> _onVideoCall(MethodCall call) async {
-    emit('videoEvent', {'event': call.method, 'data': call.arguments});
-    return null;
   }
 
   Future<dynamic> _onMethodCall(MethodCall call) async {

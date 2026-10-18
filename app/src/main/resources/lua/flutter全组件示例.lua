@@ -64,7 +64,6 @@ local 属性表 = {
   { "animatedtheme", "brightness, colorSchemeSeed, duration" },
   { "appbar", "actions, backgroundColor, bottom, centerTitle, color, elevation, foregroundColor, leading, leadingWidth, radius, scrolledUnderElevation, shadowColor, shape, surfaceTintColor, title, titleSpacing, toolbarHeight" },
   { "aspectratio", "aspectRatio, ratio" },
-  { "audioplayer", "autoPlay, src, text, title, url" },
   { "badge", "alignment, backgroundColor, color, label, largeSize, offset, smallSize, text, textColor" },
   { "barchart", "barWidth, color, colors, groups, series, value, values" },
   { "baseline", "baseline, baselineType" },
@@ -160,7 +159,6 @@ local 属性表 = {
   { "transform", "translate" },
   { "useraccountsdrawerheader", "accountEmail, accountName, backgroundColor, borderRadius, boxShadow, color, currentAccountPicture, decoration, gradient, otherAccountsPictures, radius, shadows, shape" },
   { "verticaldivider", "color, endIndent, indent, thickness" },
-  { "videoplayer", "autoPlay, loop, src, url" },
   { "wrap", "alignment, gap, runSpacing" },
 }
 
@@ -584,17 +582,10 @@ DEMOS[#DEMOS + 1] = { "动画", "Animated* 全家桶（duration + curve）", fun
 end }
 
 -- 11) 媒体 / 图表 / 其它 -----------------------------------------
-DEMOS[#DEMOS + 1] = { "媒体与图表", "Video/Audio/二维码/地图/图表/手势", function()
-  return shell("媒体与图表", {
+DEMOS[#DEMOS + 1] = { "图表与其它", "二维码/地图/图表/手势", function()
+  return shell("图表与其它", {
     SingleChildScrollView, padding = 12,
     { Column, gap = 10,
-      { Text, text = "VideoPlayer / AudioPlayer（把 src 换成你自己的路径或链接）", fontSize = 12, color = "#888888" },
-      { VideoPlayer, id = "v1", src = "/sdcard/Download/demo.mp4", autoPlay = false, controls = true },
-      { Row, gap = 8,
-        { OutlinedButton, text = "播放", onClick = "视频播放" },
-        { OutlinedButton, text = "暂停", onClick = "视频暂停" },
-        { OutlinedButton, text = "状态", onClick = "视频状态" } },
-      { AudioPlayer, id = "a1", title = "示例音频", src = "/sdcard/Download/demo.mp3" },
       { QrCode, data = "https://github.com/Zyr76/flutter", size = 140, color = "#1565c0" },
       { Text, text = "FlutterMap（换成你自己的瓦片服务更稳）", fontSize = 12, color = "#888888" },
       { Container, height = 200, radius = 10, { FlutterMap,
@@ -759,13 +750,6 @@ function pvFirst() dartCall("flutterControl", { id = "pv", action = "pageTo", in
 function 下拉刷新() 回显("已刷新（" .. os.date("%H:%M:%S") .. "）") end
 function 滑掉一条() 回显("滑掉一条（示例）") end
 function 拖动排序(e) 回显("拖动排序：" .. tostring(e.value)) end
-function 视频播放() dartCall("flutterControl", { id = "v1", action = "play" }) end
-function 视频暂停() dartCall("flutterControl", { id = "v1", action = "pause" }) end
-function 视频状态()
-  dartCall("flutterControl", { id = "v1", action = "state" }, function(res, err)
-    回显(err or ("视频：" .. tostring(res and res.isPlaying)))
-  end)
-end
 
 -- 动画状态（点按钮切换）
 动画暗, 动画高, 动画圆角, 动画内外, 动画对齐, 动画缩放, 动画转动, 动画位移, 动画字号, 动画计数, 动画左, 动画宽, 动画交叉 = 1, 44, 6, 6, "center", 1, 0, 0, 14, 0, 10, 90, "first"

@@ -345,7 +345,6 @@ public final class LuaJson {
                 "Transform", "FractionallySizedBox", "DropdownButton", "DropdownButtonFormField",
                 // 二维码 / 地图 / 图表 / 媒体
                 "QrCode", "QrImageView", "FlutterMap", "LineChart", "BarChart", "PieChart",
-                "VideoPlayer", "AudioPlayer",
                 // 反馈 / 更多 Material 控件 / 日期 / 动画
                 "Tooltip", "Badge", "Placeholder", "RefreshIndicator",
                 "SwitchListTile", "CheckboxListTile", "RadioListTile", "Radio",

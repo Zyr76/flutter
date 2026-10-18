@@ -446,44 +446,6 @@ DEMOS[#DEMOS + 1] = { "图表与二维码", "PieChart / BarChart / QrCode", func
   })
 end }
 
--- ============================================================
--- 11) 媒体（视频 / 音频）
--- ============================================================
-DEMOS[#DEMOS + 1] = { "媒体", "VideoPlayer / AudioPlayer + 控制命令", function()
-  return shell("媒体", {
-    Column, gap = 8,
-      { Expanded, {
-          VideoPlayer, id = "v",
-          url = "https://media.w3.org/2010/05/sintel/trailer.mp4",
-          controls = false } },
-      { Text, id = "mediaTip", text = "视频 / 音频控制演示", fontSize = 13, padding = 8 },
-  }, {
-    bottomNavigationBar = { BottomAppBar, { Row, gap = 4, padding = 4,
-        { TextButton, text = "播放", onClick = "vPlay" },
-        { TextButton, text = "暂停", onClick = "vPause" },
-        { TextButton, text = "-5s", onClick = "vBack" },
-        { TextButton, text = "+5s", onClick = "vFwd" },
-        { TextButton, text = "静音", onClick = "vMute" },
-        { TextButton, text = "2x", onClick = "vSpeed" } } },
-  })
-end }
-
-function vPlay() dartCall("flutterControl", { id = "v", action = "play" }, function(r, e) mediaTip.dart.Text = e or ("播放 ok=" .. tostring(r and r.ok)) end) end
-function vPause() dartCall("flutterControl", { id = "v", action = "pause" }, function(r, e) mediaTip.dart.Text = e or "已暂停" end) end
-function vSpeed() dartCall("flutterControl", { id = "v", action = "speed", speed = 2 }) end
-function vMute() dartCall("flutterControl", { id = "v", action = "volume", volume = 0 }) end
-
-function vSeekBy(d)
-  dartCall("flutterControl", { id = "v", action = "state" }, function(res, err)
-    if err or not res or not res.ok then return end
-    local pos = (res.position or 0) + d
-    if pos < 0 then pos = 0 end
-    dartCall("flutterControl", { id = "v", action = "seek", pos = pos })
-  end)
-end
-
-function vBack() vSeekBy(-5000) end
-function vFwd() vSeekBy(5000) end
 
 -- ============================================================
 -- 菜单 + 路由

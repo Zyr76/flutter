@@ -113,7 +113,7 @@ end
 
 **动画**：`AnimatedOpacity`、`AnimatedContainer`、`AnimatedAlign`、`AnimatedPadding`、`AnimatedScale`、`AnimatedRotation`、`AnimatedSlide`、`AnimatedSwitcher`、`AnimatedDefaultTextStyle`、`AnimatedCrossFade`、`AnimatedPositioned`、`AnimatedSize`、`AnimatedTheme`（都有 `duration` 毫秒、`curve`）
 
-**插件控件**：`QrCode`/`QrImageView`（qr_flutter）、`FlutterMap`（flutter_map，`center`/`zoom`/`markers`/`polylines`/`polygons`/`circles`/`tileUrl`）、`LineChart`/`BarChart`/`PieChart`（fl_chart，`series` 或 `groups`）、`VideoPlayer`、`AudioPlayer`
+**插件控件**：`QrCode`/`QrImageView`（qr_flutter）、`FlutterMap`（flutter_map，`center`/`zoom`/`markers`/`polylines`/`polygons`/`circles`/`tileUrl`）、`LineChart`/`BarChart`/`PieChart`（fl_chart，`series` 或 `groups`）
 
 ---
 

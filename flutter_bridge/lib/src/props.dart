@@ -120,7 +120,7 @@ class Props {
     'dialog', 'bottomsheet', 'materialbanner', 'pageview', 'dropdownmenu', 'reorderablelistview',
     'expansionpanellist', 'table', 'customscrollview', 'slivertoboxadapter', 'sliverpadding', 'sliverlist',
     'slivergrid', 'sliverfillremaining', 'sliverappbar', 'searchbar', 'listwheelscrollview', 'qrcode',
-    'qrimageview', 'fluttermap', 'linechart', 'barchart', 'piechart', 'videoplayer', 'audioplayer',
+    'qrimageview', 'fluttermap', 'linechart', 'barchart', 'piechart',
   };
 
   /// 注册自定义控件名（Renderer.register 会调），用于上面的兜底判定。
