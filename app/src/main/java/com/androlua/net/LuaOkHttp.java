@@ -1,6 +1,8 @@
 package com.androlua.net;
 
+import android.os.Build;
 import android.os.Handler;
+import android.util.Log;
 import android.os.Looper;
 
 import com.luajava.LuaObject;
@@ -132,6 +134,7 @@ public final class LuaOkHttp {
 
     private static synchronized void rebuild() {
         CLIENT = buildClient();
+        CLIENT_CACHE.clear();
     }
 
     // ---------- Cookie：内存 + 可选落盘 ----------
@@ -263,10 +266,22 @@ public final class LuaOkHttp {
             w.flush();
             w.close();
             w = null;
+            if (Build.VERSION.SDK_INT >= 26) {
+                try {
+                    java.nio.file.Files.move(tmp.toPath(), f.toPath(),
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    return;
+                } catch (Exception ignored) {
+                }
+            }
             if (f.exists() && !f.delete()) {
+                tmp.delete();
                 return;
             }
-            tmp.renameTo(f);
+            if (!tmp.renameTo(f)) {
+                tmp.delete();
+            }
         } catch (Exception ignored) {
         } finally {
             if (w != null) {
@@ -343,9 +358,16 @@ public final class LuaOkHttp {
         }
     }
 
+    private static final Map<Integer, OkHttpClient> CLIENT_CACHE = new ConcurrentHashMap<Integer, OkHttpClient>();
+
     private static OkHttpClient clientFor(int timeoutMs, boolean forDownload) {
         if (timeoutMs <= 0) {
             return CLIENT;
+        }
+        int cacheKey = forDownload ? -timeoutMs : timeoutMs;
+        OkHttpClient cached = CLIENT_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
         OkHttpClient.Builder b = CLIENT.newBuilder();
         if (forDownload) {
@@ -354,7 +376,9 @@ public final class LuaOkHttp {
         } else {
             b.callTimeout(timeoutMs, TimeUnit.MILLISECONDS);
         }
-        return b.build();
+        OkHttpClient made = b.build();
+        CLIENT_CACHE.put(cacheKey, made);
+        return made;
     }
 
     /** 构造请求（query / headers / form / body / json 由 Lua 侧编码成 body）。 */
@@ -381,7 +405,7 @@ public final class LuaOkHttp {
             }
         }
 
-        Request.Builder rb = new Request.Builder().url(ub.build());
+        Request.Builder rb = new Request.Builder().url(ub.build()).tag(tag);
 
         Object hs = opts.get("headers");
         if (hs instanceof LuaTable) {
@@ -398,7 +422,7 @@ public final class LuaOkHttp {
         RequestBody body = null;
         Object form = opts.get("form");
         if (form instanceof LuaTable) {
-            StringBuilder formLog = new StringBuilder();
+            StringBuilder formLog = DEBUG ? new StringBuilder() : null;
             FormBody.Builder fb = new FormBody.Builder();
             for (Object o : ((LuaTable<?, ?>) form).entrySet()) {
                 Map.Entry<?, ?> e = (Map.Entry<?, ?>) o;
@@ -413,11 +437,11 @@ public final class LuaOkHttp {
                     for (int i = 1; i <= arr.length(); i++) {
                         String one = String.valueOf(arr.get((double) i));
                         fb.add(k, one);
-                        formLog.append(k).append('=').append(one).append('&');
+                        if (formLog != null) formLog.append(k).append('=').append(one).append('&');
                     }
                 } else {
                     fb.add(k, String.valueOf(v));
-                    formLog.append(k).append('=').append(v).append('&');
+                    if (formLog != null) formLog.append(k).append('=').append(v).append('&');
                 }
             }
             body = fb.build();
@@ -428,7 +452,7 @@ public final class LuaOkHttp {
                 // P1-4：两者同时给时 body 会被忽略，明确报出来而不是静默丢弃
                 emitLog(null, "error", "form 与 body 同时存在，body 被忽略");
             }
-            String kv = formLog.length() > 0
+            String kv = formLog == null || formLog.length() == 0 ? "" : formLog.length() > 0
                     ? formLog.substring(0, formLog.length() - 1)
                     : "";
             if (DEBUG) {
@@ -512,7 +536,7 @@ public final class LuaOkHttp {
         final Handle handle = new Handle();
         handle.set(call);                       // [3] 必须在 enqueue 之前，否则同步回调时 cancel 扑空
         if (!idempotent && retries > 0) {
-            log(null, "info", tag + " " + method + " 不自动重试，retries 被忽略");  // [4]
+            emitLog(null, "error", tag + " " + method + " 非幂等，retries 被忽略");  // [4]
         }
         final int[] left = {idempotent ? retries : 0};
         enqueue(call, opts, tag, sink, left, handle);
@@ -734,6 +758,13 @@ public final class LuaOkHttp {
             @Override
             public void onResponse(Call c, Response response) {
                 boolean appending = offset > 0 && response.code() == 206;
+                if (appending) {
+                    String cr = response.header("Content-Range");
+                    if (cr == null || !cr.startsWith("bytes " + offset + "-")) {
+                        log(null, "info", "Content-Range 与本地 offset 不符（" + cr + "），改为重新下载");
+                        appending = false;
+                    }
+                }
                 if (offset > 0 && response.code() != 206) {
                     log(null, "info", "服务端不支持 Range（返回 " + response.code() + "），改为重新下载");  // [5]
                 }
@@ -748,16 +779,18 @@ public final class LuaOkHttp {
                     deliver(callback, null, null, "无法创建目录：" + parent, false);
                     return;
                 }
-                long total = appending ? offset : 0;
+                final long base = appending ? offset : 0;   // P2-9
+                long total = base;
                 long lastPost = 0;
                 long expected = response.body() == null ? -1 : response.body().contentLength();
-                if (expected > 0 && appending) {
-                    expected += offset;
+                if (expected > 0) {
+                    expected += base;
                 }
                 try (ResponseBody b = response.body();
                      InputStream in = b == null ? null : b.byteStream();
                      OutputStream os = new FileOutputStream(out, appending)) {
                     if (in == null) {
+                        out.delete();       // P2-13
                         deliver(callback, null, null, "响应体为空", false);
                         return;
                     }
@@ -766,7 +799,7 @@ public final class LuaOkHttp {
                     while ((n = in.read(buf)) != -1) {
                         if (c.isCanceled()) {
                             // P1-1：非续传时删掉半截文件；续传保留 .part 供下次接着下
-                            if (!resume) {
+                            if (!appending) {     // P2-8：重新下载时保留 .part 是脏数据
                                 out.delete();
                             }
                             deliver(callback, null, null, "已取消", true);
@@ -812,7 +845,7 @@ public final class LuaOkHttp {
         private volatile boolean reconnect;
         private volatile int reconnectDelay = 2000;
         private volatile int maxReconnectDelay = 30000;
-        private volatile int maxReconnectAttempts = 0;   // [4] 0 = 不限
+        private volatile int maxReconnectAttempts = 10;  // [4] 0 = 不限，默认 10 次
         private volatile int pingIntervalSec;
         private volatile int connectTimeoutSec;
         private volatile int attempt;
@@ -841,9 +874,17 @@ public final class LuaOkHttp {
         public void close(double code, String reason) {
             manualClose = true;                     // 主动关闭不触发重连
             state = "closing";
+            int c = (int) code;
+            if (c < 1000 || c > 4999) {
+                c = 1000;                           // P1-6：非法关闭码归一
+            }
             WebSocket w = ws;
             if (w != null) {
-                w.close((int) code, reason == null ? "" : reason);
+                try {
+                    w.close(c, reason == null ? "" : reason);
+                } catch (Exception e) {
+                    wsEmit(handlers, "onFailure", "close 失败：" + msg(e), -1.0);
+                }
             }
         }
 
@@ -957,8 +998,30 @@ public final class LuaOkHttp {
             public void onOpen(WebSocket webSocket, Response response) {
                 handle.attempt = 0;
                 handle.state = "open";
-                // [B3] 把握手响应交给 Lua：能看状态码与响应头
-                wsEmit(h, "onOpen", response);
+                // P0-2：wsEmit 异步投递，裸 Response 到回调执行时可能已失效，只传快照
+                LuaTable<Object, Object> info = null;
+                try {
+                    LuaState L0 = h == null ? null : h.getLuaState();
+                    if (L0 != null) {
+                        info = new LuaTable<Object, Object>(L0);
+                        info.put("code", (double) response.code());
+                        LuaTable<String, Object> h1 = new LuaTable<String, Object>(L0);
+                        LuaTable<Object, Object> h2 = new LuaTable<Object, Object>(L0);
+                        for (String name : response.headers().names()) {
+                            List<String> vs = response.headers(name);
+                            h1.put(name, vs.isEmpty() ? "" : vs.get(0));
+                            LuaTable<Object, Object> list = new LuaTable<Object, Object>(L0);
+                            for (int i = 0; i < vs.size(); i++) {
+                                list.put((double) (i + 1), vs.get(i));
+                            }
+                            h2.put(name, list);
+                        }
+                        info.put("headers", h1);
+                        info.put("headersAll", h2);
+                    }
+                } catch (Exception ignored) {
+                }
+                wsEmit(h, "onOpen", info);
             }
 
             @Override
@@ -1015,7 +1078,7 @@ public final class LuaOkHttp {
         if (handlers == null) {
             // [2] 没给 handlers 时也不静默：至少让失败在控制台可见
             if ("onFailure".equals(name) && args.length > 0) {
-                System.out.println("[okhttp] WebSocket 失败（未提供 handlers）：" + args[0]);
+                Log.e("okhttp", "WebSocket 失败（未提供 handlers）：" + args[0]);
             }
             return;
         }
@@ -1223,7 +1286,7 @@ public final class LuaOkHttp {
                         }
                     }
                     // P3-1：既没有 logger 也拿不到 Lua 状态时，退回控制台
-                    System.out.println("[okhttp] " + message);
+                    Log.e("okhttp", message);
                 } catch (Exception ignored) {
                 }
             }
@@ -1266,7 +1329,9 @@ public final class LuaOkHttp {
                         LuaTable<Object, Object> all = new LuaTable<Object, Object>(L);
                         for (String name : response.headers().names()) {
                             List<String> values = response.headers(name);
-                            h.put(name, values.isEmpty() ? "" : values.get(0));
+                            String v0 = values.isEmpty() ? "" : values.get(0);
+                            h.put(name, v0);
+                            h.put(name.toLowerCase(), v0);
                             LuaTable<Object, Object> list = new LuaTable<Object, Object>(L);
                             for (int i = 0; i < values.size(); i++) {
                                 list.put((double) (i + 1), values.get(i));
@@ -1308,7 +1373,7 @@ public final class LuaOkHttp {
     }
 
     private static void reportCallbackError(LuaObject cb, Exception e) {
-        e.printStackTrace();
+        Log.e("okhttp", "回调执行出错", e);
         emitLog(cb, "error", "回调执行出错：" + msg(e));
     }
 }
