@@ -183,6 +183,25 @@ report("空空间 keys 为空表", (function()
   return type(e) == "table" and #e == 0
 end)())
 
+-- ---------------------------------------------------------------- 5.5 批量接口
+print("\n== 5.5 批量接口 ==")
+clearAll()
+do
+  local b = "_obtest_bulk"
+  local n = ob.存多(b, { a = 1, b = "x", c = { 深 = true } })
+  report("存多 返回写入条数", n == 3, n)
+  report("存多 后数量正确", ob.数量(b) == 3, ob.数量(b))
+
+  local vals = ob.取多(b, { "a", "b", "c", "缺失" })
+  report("取多 结果同序（数字）", vals[1] == 1, tostring(vals[1]))
+  report("取多 结果同序（字符串）", vals[2] == "x", tostring(vals[2]))
+  report("取多 嵌套表正确", deepEq(vals[3], { 深 = true }), tostring(vals[3]))
+  report("取多 缺失位为 nil", vals[4] == nil, tostring(vals[4]))
+
+  report("删多 返回条数", ob.删多(b, { "a", "b" }) == 2, ob.数量(b))
+  report("删多 后数量正确", ob.数量(b) == 1, ob.数量(b))
+end
+
 -- ---------------------------------------------------------------- 6. 特殊字符
 print("\n== 6. 特殊字符 ==")
 local specials = {

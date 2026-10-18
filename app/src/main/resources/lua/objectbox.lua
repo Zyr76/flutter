@@ -10,6 +10,10 @@
 --   print(table.concat(ob.键("配置"), ",")) --> 主题
 --   ob.删("配置", "主题")
 --   ob.清空("配置")
+--   -- 批量（整批只提交一个事务，比逐条快一到两个数量级）
+--   ob.存多("缓存", { a = 1, b = 2 })
+--   local vals = ob.取多("缓存", { "a", "b" })
+--   ob.删多("缓存", { "a", "b" })
 local ObjectBox = luajava.bindClass("com.androlua.objectbox.ObjectBox")
 
 -- 用 yyjson 而不是 cjson：自带 cjson 把数字精度硬限制在 1~14 位（DEFAULT_ENCODE_NUMBER_PRECISION=14，
@@ -85,7 +89,46 @@ function M.清空(space)
   return tonumber(ObjectBox.clear(tostring(space)))
 end
 
+--- 批量写入：tbl 是 { 键 = 值 } 的表，整批一个事务。返回写入条数。
+function M.存多(space, tbl)
+  local ks, vs = {}, {}
+  for k, v in pairs(tbl) do
+    ks[#ks + 1] = tostring(k)
+    vs[#vs + 1] = encode(v)
+  end
+  if #ks == 0 then
+    return 0
+  end
+  return ObjectBox.putMany(tostring(space),
+    luajava.createArray("java.lang.String", ks),
+    luajava.createArray("java.lang.String", vs))
+end
+
+--- 批量读取：keys 为数组，返回同序结果（缺失位置为 nil）。
+function M.取多(space, keys)
+  if #keys == 0 then
+    return {}
+  end
+  local res = ObjectBox.getMany(tostring(space), luajava.createArray("java.lang.String", keys))
+  local out = {}
+  for i = 1, #keys do
+    -- LuaJava 下 Java 数组越界会抛错，而不是返回 nil
+    local okk, raw = pcall(function() return res[i - 1] end)
+    out[i] = okk and decode(raw) or nil
+  end
+  return out
+end
+
+--- 批量删除，整批一个事务。返回处理的键数。
+function M.删多(space, keys)
+  if #keys == 0 then
+    return 0
+  end
+  return ObjectBox.removeMany(tostring(space), luajava.createArray("java.lang.String", keys))
+end
+
 M.put, M.get, M.remove, M.keys, M.count, M.clear =
   M.存, M.取, M.删, M.键, M.数量, M.清空
+M.putMany, M.getMany, M.removeMany = M.存多, M.取多, M.删多
 
 return M

@@ -13,7 +13,11 @@ import io.objectbox.annotation.Index;
  */
 @Entity
 public class LuaObject {
-    @Id
+    /**
+     * 主键由 ObjectBox.java 的 idOf(space, key) 计算后写入，因此必须声明 assignable：
+     * 默认的自增语义会拒绝外部指定的大 id（报 “ID is higher or equal to internal ID sequence”）。
+     */
+    @Id(assignable = true)
     public long id;
 
     @Index
