@@ -2985,14 +2985,6 @@ class BridgeBottomNav extends StatefulWidget {
 }
 
 class _BridgeBottomNavState extends State<BridgeBottomNav> {
-  late int _index = widget.initialIndex;
-
-  @override
-  void didUpdateWidget(BridgeBottomNav old) {
-    super.didUpdateWidget(old);
-    if (widget.initialIndex != old.initialIndex) setState(() => _index = widget.initialIndex);
-  }
-
   List<BottomNavigationBarItem> _items() {
     return widget.items.map((e) {
       final ip = Props.of(e);
@@ -3005,12 +2997,13 @@ class _BridgeBottomNavState extends State<BridgeBottomNav> {
 
   @override
   Widget build(BuildContext context) {
+    // 受控约定同 NavigationBar：currentIndex 完全来自 spec，点击只回传事件。
     return BottomNavigationBar(
-      currentIndex: _index.clamp(0, widget.items.isEmpty ? 0 : widget.items.length - 1),
+      currentIndex: widget.initialIndex.clamp(0, widget.items.isEmpty ? 0 : widget.items.length - 1),
       type: widget.type,
       selectedItemColor: widget.selectedColor,
       unselectedItemColor: widget.unselectedColor,
-      onTap: (i) { setState(() => _index = i); widget.onTap?.call(i); },
+      onTap: (i) => widget.onTap?.call(i),
       items: _items(),
     );
   }
@@ -3568,26 +3561,16 @@ class BridgeNavigationBar extends StatefulWidget {
 }
 
 class _BridgeNavigationBarState extends State<BridgeNavigationBar> {
-  int? _tapped;
-
   int get _propIndex => widget.items.isEmpty ? 0 : widget.initialIndex.clamp(0, widget.items.length - 1);
 
   @override
   Widget build(BuildContext context) {
     final p = widget.p;
-    // 属性是声明式的：spec 写 currentIndex=n 就停在第 n 项；用户点过后重建时按属性纠偏
-    final want = _propIndex;
-    if (_tapped != null && _tapped != want) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _tapped != null && _tapped != want) setState(() => _tapped = null);
-      });
-    }
+    // 受控约定：选中项完全由 spec 的 currentIndex 决定，点击只回传事件。
+    // Lua 必须在 onTap 回调里把 currentIndex 写回并重渲染，否则界面停在原选项。
     return NavigationBar(
-      selectedIndex: _tapped ?? want,
-      onDestinationSelected: (i) {
-        setState(() => _tapped = i);
-        widget.onTap?.call(i);
-      },
+      selectedIndex: _propIndex,
+      onDestinationSelected: (i) => widget.onTap?.call(i),
       destinations: widget.items.map((e) {
         final ip = Props.of(e);
         return NavigationDestination(

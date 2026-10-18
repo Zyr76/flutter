@@ -438,7 +438,7 @@ end }
 DEMOS[#DEMOS + 1] = { "导航与框架", "TabBar/Drawer/BottomNavigationBar/NavigationBar/Rail/BottomAppBar", function()
   return shell("导航与框架", {
     Column,
-    { NavigationBar, currentIndex = 0, onChange = "底栏切换",
+    { NavigationBar, id = "底栏", currentIndex = 0, onChange = "底栏切换",
       items = { { icon = "home", label = "首页" }, { icon = "person", label = "我的" } } },
     { MaterialBanner, leading = { Icon, icon = "info" },
       content = { Text, text = "MaterialBanner：重要提示条" },
@@ -704,7 +704,10 @@ function 搜索回显(e) 回显("搜索：" .. tostring(e.value)) end
 function 日期回显(e) 回显("日期：" .. tostring(e.value)) end
 function 时间回显(e) 回显("时间：" .. tostring(e.value)) end
 function 翻页回显(e) 回显("第 " .. tostring((e.value or 0) + 1) .. " 页") end
-function 底栏切换(e) 回显("底栏：" .. tostring(e.value)) end
+function 底栏切换(e)
+  回显("底栏：" .. tostring(e.value))
+  底栏.dart.CurrentIndex = e.value   -- 受控：必须写回，否则选中项不动
+end
 function 侧栏切换(e) 回显("侧栏：" .. tostring(e.value)) end
 function 切页完成(e) end
 function 弹窗关闭() 回显("弹窗已关闭") end

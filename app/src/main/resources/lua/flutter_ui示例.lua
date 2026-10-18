@@ -288,7 +288,8 @@ DEMOS[#DEMOS + 1] = { "导航", "TabBar / TabBarView / Drawer / NavigationBar", 
   })
 end }
 
-function navChanged(e) end
+-- 受控约定：点击只回传事件，必须把 currentIndex 写回（这里用句柄改属性）
+function navChanged(e) nav.dart.CurrentIndex = e.value end
 
 -- 标签页/抽屉的运行期控制
 function tabGo(e) end
