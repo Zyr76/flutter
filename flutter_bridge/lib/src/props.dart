@@ -671,7 +671,12 @@ class Props {
   static DateTime? toDate(dynamic v) {
     if (v == null) return null;
     if (v is DateTime) return v;
-    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+    if (v is num) {
+      final n = v.toInt();
+      // Lua 的 os.time() 是秒级（约 1.7e9），毫秒级约 1.7e12。
+      // 以 1e11 为界，避免把秒当毫秒解析成 1970 年。
+      return DateTime.fromMillisecondsSinceEpoch(n.abs() < 100000000000 ? n * 1000 : n);
+    }
     return DateTime.tryParse(v.toString());
   }
 
@@ -714,7 +719,7 @@ class Props {
 
   static TextInputType? toKeyboardType(dynamic v) {
     switch (v?.toString().toLowerCase()) {
-      case 'number':
+      case 'number': return TextInputType.number;
       case 'phone': return TextInputType.phone;
       case 'decimal': return const TextInputType.numberWithOptions(decimal: true);
       case 'email': return TextInputType.emailAddress;

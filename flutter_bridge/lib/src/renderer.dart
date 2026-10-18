@@ -545,17 +545,26 @@ class Renderer {
         );
         break;
       case 'snackbar':
-        result = SnackBar(
-          content: child0(),
-          backgroundColor: p.color('backgroundColor') ?? p.color('color'),
-          elevation: p.n('elevation'),
-          duration: p.has('duration') ? Props.toDuration(p['duration']) : const Duration(milliseconds: 4000),
-          behavior: p.s('behavior')?.toLowerCase() == 'floating' ? SnackBarBehavior.floating : SnackBarBehavior.fixed,
-          width: p.n('width'),
-          action: p['action'] != null
-              ? SnackBarAction(label: (p['actionLabel'] ?? 'OK').toString(), onPressed: _tapHandler(p) ?? () {})
-              : null,
-        );
+        {
+          // SnackBar 不能作为普通节点入树：它要由 ScaffoldMessenger 驱动显示与动画。
+          final snack = SnackBar(
+            content: child0(),
+            backgroundColor: p.color('backgroundColor') ?? p.color('color'),
+            elevation: p.n('elevation'),
+            duration: p.has('duration') ? Props.toDuration(p['duration']) : const Duration(milliseconds: 4000),
+            behavior: p.s('behavior')?.toLowerCase() == 'floating' ? SnackBarBehavior.floating : SnackBarBehavior.fixed,
+            width: p.n('width'),
+            action: p['action'] != null
+                ? SnackBarAction(label: (p['actionLabel'] ?? 'OK').toString(), onPressed: _tapHandler(p) ?? () {})
+                : null,
+          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final ctx = FlutterBridge.instance.navigatorKey.currentContext;
+            final messenger = ctx == null ? null : ScaffoldMessenger.maybeOf(ctx);
+            messenger?.showSnackBar(snack);
+          });
+          result = const SizedBox.shrink();
+        }
         break;
 
       // ---------- 交互 ----------
@@ -2553,7 +2562,9 @@ class Renderer {
     final sp = Props.of(p['style']);
     final bg = sp.color('backgroundColor') ?? p.color('backgroundColor');
     final fg = sp.color('foregroundColor') ?? p.color('foregroundColor');
-    final pad = sp.inset('padding') ?? p.inset('padding');
+    // 顶层 padding 由按钮 case 的外层 Padding 负责，这里只认 style 里的 padding，
+    // 否则写一个 padding 会被应用两次（视觉上翻倍）。
+    final pad = sp.inset('padding');
     final el = sp.n('elevation') ?? p.n('elevation');
     final shadow = sp.color('shadowColor') ?? p.color('shadowColor');
     final overlay = sp.color('overlayColor') ?? p.color('overlayColor');
@@ -3286,6 +3297,9 @@ class _IdNodeState extends State<_IdNode> {
   @override
   void dispose() {
     FlutterControl.unmount(widget.id);
+    // 与 field 初始化里的 nodeNotifier(id, ...) 配对：归零后移除 nodeSpecs 条目，
+    // 否则只会越攒越多，且 patch 会发给已经不在树里的 notifier。
+    FlutterBridge.instance.releaseNode(widget.id);
     super.dispose();
   }
 

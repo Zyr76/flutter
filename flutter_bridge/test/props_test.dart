@@ -1,5 +1,6 @@
 // Props 转换器与缓存的单元测试。
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_bridge/src/props.dart';
@@ -47,6 +48,28 @@ void main() {
     expect(Props.toDate('2026-01-02'), DateTime(2026, 1, 2));
     expect(Props.toDate(0)!.millisecondsSinceEpoch, 0);
     expect(Props.toDate(null), isNull);
+  });
+
+  test('toDate：Lua os.time() 的秒级时间戳要按秒解析（P-11）', () {
+    const sec = 1750000000; // 2025-06-15 左右，10 位
+    final a = Props.toDate(sec)!;
+    final b = Props.toDate(sec * 1000)!; // 同刻的毫秒值
+    expect(a.year, greaterThan(2024));
+    expect(a.millisecondsSinceEpoch, sec * 1000);
+    expect(a, b);
+  });
+
+  test('toKeyboardType：number 不再返回电话键盘（P-15）', () {
+    expect(Props.toKeyboardType('number'), TextInputType.number);
+    expect(Props.toKeyboardType('phone'), TextInputType.phone);
+    expect(Props.toKeyboardType('decimal')!.decimal, isTrue);
+  });
+
+  test('toColor：命名色与 3 位简写都认（B-8 复用后能力一致）', () {
+    expect(Props.toColor('red'), const Color(0xFFF44336));
+    expect(Props.toColor('#f00'), const Color(0xFFFF0000));
+    expect(Props.toColor('#80ff0000'), const Color(0x80FF0000));
+    expect(Props.toColor(0xFFFF0000), const Color(0xFFFF0000));
   });
 
   test('渐变支持 angle 与 radial/sweep', () {

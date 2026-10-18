@@ -31,7 +31,8 @@ class FlutterBridge {
   static const MethodChannel channel = MethodChannel('androlua/flutter');
 
   /// 渲染尚未到达时先存下的补丁（render 一到就补）。
-  final List<MapEntry<String, dynamic>> _pendingPatches = [];
+  /// 渲染尚未到达时先存下的补丁：按 id 去重（同 id 只留最后一次），带时间戳用于过期丢弃。
+  final Map<String, (dynamic, DateTime)> _pendingPatches = {};
 
   /// 当前渲染的 widget 树描述（JSON 字符串），由原生 `render` 写入。
   ///
@@ -46,9 +47,26 @@ class FlutterBridge {
   /// 每个带 id 节点的当前 spec，供命令式更新（patch）或全量 render 时定点重建。
   final Map<String, ValueNotifier<dynamic>> nodeSpecs = {};
 
-  /// 取得（必要时创建）某 id 节点的 spec notifier。
-  ValueNotifier<dynamic> nodeNotifier(String id, dynamic initial) =>
-      nodeSpecs.putIfAbsent(id, () => ValueNotifier<dynamic>(initial));
+  /// id 的在树引用计数：_IdNode 挂载 +1、卸载 -1，归零才移除 nodeSpecs。
+  /// 不清理会让 nodeSpecs 只增不减，且 _applyPatch 的 containsKey 退化成“曾经存在过”。
+  final Map<String, int> _nodeRefs = {};
+
+  /// 取得（必要时创建）某 id 节点的 spec notifier（引用计数 +1）。
+  ValueNotifier<dynamic> nodeNotifier(String id, dynamic initial) {
+    _nodeRefs[id] = (_nodeRefs[id] ?? 0) + 1;
+    return nodeSpecs.putIfAbsent(id, () => ValueNotifier<dynamic>(initial));
+  }
+
+  /// 节点卸载时调用（引用计数 -1，归零移除）。
+  void releaseNode(String id) {
+    final n = (_nodeRefs[id] ?? 0) - 1;
+    if (n <= 0) {
+      _nodeRefs.remove(id);
+      nodeSpecs.remove(id);
+    } else {
+      _nodeRefs[id] = n;
+    }
+  }
 
   /// dartCall 的逻辑方法表：名字 -> 函数(参数 map) -> 可 JSON 序列化的返回值。
   final Map<String, dynamic Function(Map<String, dynamic>? args)> handlers = {};
@@ -127,14 +145,22 @@ class FlutterBridge {
   Future<dynamic> _onMethodCall(MethodCall call) async {
     switch (call.method) {
       case 'render':
-        spec.value = call.arguments as String?;
-        // 之前渲染没到就排队的补丁，现在一并补上。
+        // B-11：原生误传非 String 时给出明确事件，而不是抛 TypeError
+        final rawSpec = call.arguments;
+        if (rawSpec is! String && rawSpec != null) {
+          emit('renderError', {'message': 'render 参数不是 String: ${rawSpec.runtimeType}'});
+          return null;
+        }
+        spec.value = rawSpec as String?;
+        // 排队补丁：丢掉超过 30 秒的（渲染一直不来不能无限攒），其余按 id 补打（已去重）。
         if (_pendingPatches.isNotEmpty) {
-          final pending = List<MapEntry<String, dynamic>>.from(_pendingPatches);
+          final now = DateTime.now();
+          final pending = <String, dynamic>{};
+          _pendingPatches.forEach((id, entry) {
+            if (now.difference(entry.$2).inSeconds <= 30) pending[id] = entry.$1;
+          });
           _pendingPatches.clear();
-          for (final e in pending) {
-            _applyPatch(e.key, e.value);
-          }
+          pending.forEach(_applyPatch);
         }
         return null;
       case 'patch':
@@ -147,7 +173,7 @@ class FlutterBridge {
         if (spec.value == null || spec.value!.isEmpty) {
           // 渲染还没到（引擎刚启动时 render/patch 可能乱序或被通道缓冲丢弃）：
           // 先存着，render 一到再补，而不是丢掉（丢掉就是“改了没反应”）。
-          _pendingPatches.add(MapEntry(id, patch));
+          _pendingPatches[id] = (patch, DateTime.now());
           emit('patchDiag', 'spec 未到，补丁已排队 id=$id');
         } else {
           _applyPatch(id, patch);
@@ -157,23 +183,31 @@ class FlutterBridge {
         {
           final ctx = navigatorKey.currentContext;
           if (ctx == null) return null;
-          await showDialog<dynamic>(
-            context: ctx,
-            barrierDismissible: true,
-            builder: (_) => Renderer.build(_dialogSpec(decodeSpec(call.arguments))),
-          );
-          emit('dialogClosed');
+          try {
+            await showDialog<dynamic>(
+              context: ctx,
+              barrierDismissible: true,
+              builder: (_) => Renderer.build(_dialogSpec(decodeSpec(call.arguments))),
+            );
+            emit('dialogClosed');
+          } catch (e) {
+            emit('dialogError', {'message': e.toString()});
+          }
           return null;
         }
       case 'bottomSheet':
         {
           final ctx = navigatorKey.currentContext;
           if (ctx == null) return null;
-          await showModalBottomSheet<dynamic>(
-            context: ctx,
-            builder: (_) => Renderer.build(_dialogSpec(decodeSpec(call.arguments), type: 'Column')),
-          );
-          emit('bottomSheetClosed');
+          try {
+            await showModalBottomSheet<dynamic>(
+              context: ctx,
+              builder: (_) => Renderer.build(_dialogSpec(decodeSpec(call.arguments), type: 'Column')),
+            );
+            emit('bottomSheetClosed');
+          } catch (e) {
+            emit('bottomSheetError', {'message': e.toString()});
+          }
           return null;
         }
       case 'snackBar':
@@ -305,21 +339,19 @@ class FlutterBridge {
     return raw;
   }
 
-  static Color? _parseColor(dynamic v) {
-    if (v is int) return Color(v);
-    if (v is! String) return null;
-    var hex = v.toLowerCase().replaceFirst('#', '').replaceFirst('0x', '');
-    if (hex.length == 6) hex = 'ff$hex';
-    final i = int.tryParse(hex, radix: 16);
-    return i == null ? null : Color(i);
-  }
+  /// 与 Props.toColor 保持单一实现（支持 int / 0x 前缀 / 3·6·8 位 hex / 命名色）。
+  static Color? _parseColor(dynamic v) => Props.toColor(v);
 
   Map<String, dynamic>? decodeArgs(dynamic raw) {
     if (raw == null) return null;
     if (raw is Map) return raw.cast<String, dynamic>();
     if (raw is String && raw.isNotEmpty) {
-      final d = jsonDecode(raw);
-      if (d is Map) return d.cast<String, dynamic>();
+      try {
+        final d = jsonDecode(raw);
+        if (d is Map) return d.cast<String, dynamic>();
+      } catch (e) {
+        if (kDebugMode) debugPrint('[Bridge] decodeArgs 解析失败: $e');
+      }
     }
     return null;
   }
@@ -349,7 +381,13 @@ class FlutterBridge {
 
   /// Flutter -> 原生 事件。
   void emit(String name, [dynamic data]) {
-    channel.invokeMethod<void>('nativeEvent', jsonEncode({'name': name, 'data': data}));
+    // 通道不通（引擎销毁/原生未就绪）时不能变成未处理的 Future 异常，
+    // 否则错误处理路径里会二次抛错。
+    channel
+        .invokeMethod<void>('nativeEvent', jsonEncode({'name': name, 'data': data}))
+        .catchError((Object e) {
+      if (kDebugMode) debugPrint('[Bridge] emit($name) 失败: $e');
+    });
   }
 
   /// 原生 -> Flutter 事件（内部使用，由 widget 回调触发）。可注册多个同名监听。
@@ -362,7 +400,9 @@ class FlutterBridge {
     if (listener == null) {
       eventListeners.remove(name);
     } else {
-      eventListeners[name]?.remove(listener);
+      final list = eventListeners[name];
+      list?.remove(listener);
+      if (list != null && list.isEmpty) eventListeners.remove(name);
     }
   }
 }
