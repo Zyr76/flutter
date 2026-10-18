@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'logic.dart';
+import 'props.dart';
 import 'renderer.dart';
 
 /// ValueNotifier 的同值也通知版：`spec` 用它，保证「整页重渲染」一定触发重建。
