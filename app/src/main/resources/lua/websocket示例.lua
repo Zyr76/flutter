@@ -1,20 +1,19 @@
 -- ============================================================
--- WebSocket 示例（基于 websocket.lua / OkHttp）
+-- WebSocket 示例（基于 okhttp.lua / OkHttp）
 --
 -- 改下面对应的地址即可连你自己的服务（ws:// 和 wss:// 都支持）。
 -- 界面：顶部状态栏 + 输入框 + 发送/断开/重连按钮 + 事件日志
 --
 -- 说明：
---   * 回调跑在 OkHttp 线程，本示例直接改 Lua 状态并重渲染（引擎内部已加锁），
---     但不要在回调里做耗时运算——会占住连接线程。
---   * 断线自动重连已开（指数退避 2s → 4s → 8s…），日志里能看到重连过程。
+--   * 回调已由 Java 侧投递回主线程，可直接改 Lua 状态并重渲染。
+--   * 自动重连需要自己在这里做（监听 onClose/onFailure 后延时重连）。
 -- ============================================================
 require "import"
 require "flutter"          -- Flutter 渲染接口需要显式导入（不导入会直接报错）
 import "android.widget.*"
 import "android.view.*"
 
-local websocket = require "websocket"
+local okhttp = require "okhttp"
 
 activity.setTitle("WebSocket 示例")
 
@@ -67,26 +66,20 @@ local function 连接()
     状态.ws = nil
   end
   状态.连接 = "连接中"
-  状态.ws = websocket.connect(地址, {
-    reconnect = true,
-    reconnectDelay = 2000,
-    maxReconnectDelay = 30000,
-    pingInterval = 20,          -- OkHttp 内置心跳
-    connectTimeout = 15,
-    -- json = true,             -- 想自动解析 JSON 就把这行打开
-    onOpen = function(ws, response)
+  状态.ws = okhttp.ws(地址, {
+    onOpen = function()
       状态.连接 = "已连接"
-      加日志("已连接：" .. tostring(ws.url))
+      加日志("已连接")
     end,
-    onMessage = function(ws, 数据, 二进制)
-      加日志((二进制 and "[二进制] " or "收到：") .. tostring(数据))
+    onMessage = function(数据)
+      加日志("收到：" .. tostring(数据))
     end,
-    onClose = function(ws, code, reason)
+    onClose = function(code, reason)
       状态.连接 = "已断开"
       加日志(string.format("已关闭 code=%s reason=%s", tostring(code), tostring(reason)))
     end,
-    onError = function(ws, err)
-      状态.连接 = "出错（会自动重连）"
+    onFailure = function(err)
+      状态.连接 = "出错"
       加日志("错误：" .. tostring(err))
     end,
   })

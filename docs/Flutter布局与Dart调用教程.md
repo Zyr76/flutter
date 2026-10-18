@@ -371,6 +371,9 @@ end)
 - **全局配置**：`ok.setCache(dir, bytes)`、`ok.setProxy(host, port)` / `ok.clearProxy()`、
   `ok.setSslVerify(false)`（仅调试）、`ok.setCookieFile(path)`（Cookie 落盘，存在则自动加载）。
 - **重试**：`opts.retries = 2`，**仅对 GET/HEAD 生效**（POST 重试可能重复提交，默认不做）。
+- **WebSocket**：`local ws = ok.ws("wss://…", { headers = {...}, onOpen = fn, onMessage = fn(文本), onClose = fn(code, reason), onFailure = fn(err) })`；
+  句柄方法 `ws.send(文本)` / `ws.close()` / `ws.cancel()`（Java 对象，用点号）。回调已投递回主线程；
+  自动重连需自己在 `onClose`/`onFailure` 里延时重连。
 - **会话**：内置内存 Cookie（按 host 累积），同一进程内跨请求保持登录态；`ok.clearCookies()` 可清空。
 - **日志**：`ok.debug(true)` 打印请求/响应日志；默认关闭，关闭时完全静默。
 - **限制**：响应体超过 8 MB 会直接返回错误（提示改用 `download`），避免 OOM。

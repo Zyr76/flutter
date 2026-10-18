@@ -133,6 +133,16 @@ function M.setCookieFile(path)
   OkHttp.setCookieFile(path)
 end
 
+--- WebSocket：ok.ws(url, { headers = {...}, onOpen=, onMessage=, onClose=, onFailure= })
+--- 返回句柄：ws.send(text) / ws.close() / ws.cancel()（Java 对象，用点号调用）
+function M.ws(url, h)
+  h = h or {}
+  if type(h) ~= "table" then
+    error("okhttp.ws: 第二个参数必须是表", 2)
+  end
+  return OkHttp.ws(url, h)
+end
+
 --- 取消在途请求（传 request/get/post 的返回值）。
 function M.cancel(call)
   if call ~= nil then

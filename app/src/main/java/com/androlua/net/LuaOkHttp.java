@@ -50,6 +50,8 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
 
 /**
  * OkHttp 的 Lua 门面（Lua 侧见 resources/lua/okhttp.lua）。
@@ -794,6 +796,111 @@ public final class LuaOkHttp {
             }
         });
         return handle;
+    }
+
+    /** WebSocket 句柄：send(text) / close() / cancel()。 */
+    public static final class WsHandle {
+        private volatile WebSocket ws;
+
+        void set(WebSocket w) {
+            ws = w;
+        }
+
+        public boolean send(String text) {
+            WebSocket w = ws;
+            return w != null && w.send(text);
+        }
+
+        public void close() {
+            WebSocket w = ws;
+            if (w != null) {
+                w.close(1000, null);
+            }
+        }
+
+        public void cancel() {
+            WebSocket w = ws;
+            if (w != null) {
+                w.cancel();
+            }
+        }
+    }
+
+    /**
+     * 建立 WebSocket 连接（ws / wss）。
+     *
+     * @param url      ws:// 或 wss:// 地址
+     * @param handlers Lua 表：headers / onOpen / onMessage / onClose / onFailure
+     * @return 句柄，可 send / close / cancel
+     */
+    public static WsHandle ws(String url, LuaTable handlers) {
+        if (url == null || url.trim().isEmpty()) {
+            throw new IllegalArgumentException("okhttp.ws(url, handlers)：url 必填");
+        }
+        Request.Builder rb;
+        try {
+            HttpUrl u = HttpUrl.parse(url.trim());
+            if (u == null) {
+                throw new IllegalArgumentException("url 非法：" + url);
+            }
+            rb = new Request.Builder().url(u);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("okhttp.ws: " + msg(e));
+        }
+        Object hs = handlers == null ? null : handlers.get("headers");
+        if (hs instanceof LuaTable) {
+            for (Object o : ((LuaTable<?, ?>) hs).entrySet()) {
+                Map.Entry<?, ?> e = (Map.Entry<?, ?>) o;
+                if (e.getKey() != null && e.getValue() != null) {
+                    rb.header(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+                }
+            }
+        }
+        final LuaTable<?, ?> h = handlers;
+        final WsHandle handle = new WsHandle();
+        final WebSocket ws = CLIENT.newWebSocket(rb.build(), new WebSocketListener() {
+            @Override
+            public void onOpen(WebSocket webSocket, Response response) {
+                wsEmit(h, "onOpen");
+            }
+
+            @Override
+            public void onMessage(WebSocket webSocket, String text) {
+                wsEmit(h, "onMessage", text);
+            }
+
+            @Override
+            public void onClosing(WebSocket webSocket, int code, String reason) {
+                wsEmit(h, "onClose", (double) code, reason == null ? "" : reason);
+            }
+
+            @Override
+            public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+                wsEmit(h, "onFailure", msg(t));
+            }
+        });
+        handle.set(ws);
+        return handle;
+    }
+
+    /** 把 WebSocket 事件投递到主线程再调 Lua。 */
+    private static void wsEmit(final LuaTable<?, ?> handlers, final String name, final Object... args) {
+        if (handlers == null) {
+            return;
+        }
+        MAIN.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Object fn = handlers.get(name);
+                    if (fn instanceof LuaObject) {
+                        ((LuaObject) fn).call(args);
+                    }
+                } catch (Exception e) {
+                    emitLog(null, "error", "WebSocket 回调 " + name + " 出错：" + msg(e));
+                }
+            }
+        });
     }
 
     /** 单文件上传（multipart）。 */
