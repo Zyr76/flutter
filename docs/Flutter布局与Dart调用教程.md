@@ -354,7 +354,13 @@ end)
 
 - 后端是 **OkHttp**：异步（不阻塞 UI）、**支持 HTTPS**、连接池、每请求超时。
 - **回调在主线程执行**，里面可以安全操作控件。
-- 结果表：`ok` / `code` / `body` / `headers` / `error`；`ok.decode(res)` 把 `body` 当 JSON 解析。
+- 结果表：`ok` / `code` / `body` / `headers`（单值）/ `headersAll`（多值，如多个 `Set-Cookie`）/ `canceled` / `error`；
+  `ok.decode(res)` 把 `body` 当 JSON 解析。
+- **取消**：`local call = ok.get(url, cb)` 返回句柄，页面退出时 `ok.cancel(call)`；被取消的请求回调会带 `canceled = true`。
+- **下载 / 上传**：`ok.download(url, path, cb)`（流式写文件，不整体入内存）、`ok.upload(url, "file", path, cb)`（multipart）。
+- **会话**：内置内存 Cookie（按 host 累积），同一进程内跨请求保持登录态；`ok.clearCookies()` 可清空。
+- **日志**：`ok.debug(true)` 打印请求/响应日志；默认关闭，关闭时完全静默。
+- **限制**：响应体超过 8 MB 会直接返回错误（提示改用 `download`），避免 OOM。
 - 方法：`get` / `post` / `put` / `patch` / `delete` / `head` / 通用 `request{...}`。
 - 对比：`require "http"`（LuaSocket）是**同步**的、**不支持 https**，只适合明文/局域网；脚本里建议一律用 `okhttp`。
 
