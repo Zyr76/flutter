@@ -79,11 +79,17 @@ class FlutterBridge {
 
   void setUiDebug(bool on) {
     uiDebug = on;
-    debugPrint('[Flutter] UI 调试已${on ? "开启" : "关闭"}');
+    // 开关确认信息由 Lua 侧 flutter_debug 打印，这里不重复输出
   }
 
   /// 已上报过的问题（同类只报一次，避免每帧刷屏）。
   final Set<String> _reportedIssues = {};
+
+  /// 诊断事件：只有 uiDebug 打开时才发（关闭调试时不往 Lua 控制台刷任何信息）。
+  void emitDiag(String message) {
+    if (!uiDebug) return;
+    emit('patchDiag', message);
+  }
 
   /// 上报一条 UI 侧问题（未知控件等）：仅 uiDebug 打开时生效，同类只报一次。
   void reportUiIssue(String message) {
@@ -181,7 +187,7 @@ class FlutterBridge {
           // 渲染还没到（引擎刚启动时 render/patch 可能乱序或被通道缓冲丢弃）：
           // 先存着，render 一到再补，而不是丢掉（丢掉就是“改了没反应”）。
           _pendingPatches[id] = (patch, DateTime.now());
-          emit('patchDiag', 'spec 未到，补丁已排队 id=$id');
+          emitDiag('spec 未到，补丁已排队 id=$id');
         } else {
           _applyPatch(id, patch);
         }
@@ -321,16 +327,16 @@ class FlutterBridge {
   void _applyPatch(String id, dynamic patch) {
     if (nodeSpecs.containsKey(id)) {
       nodeSpecs[id]!.value = patch;
-      emit('patchDiag', '定点重建(已构建) id=$id');
+      emitDiag('定点重建(已构建) id=$id');
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final notifier = nodeSpecs[id];
       if (notifier != null) {
         notifier.value = patch;
-        emit('patchDiag', '帧后定点重建 id=$id');
+        emitDiag('帧后定点重建 id=$id');
       } else {
-        emit('patchDiag', '帧后仍无该节点 id=$id（忽略）');
+        emitDiag('帧后仍无该节点 id=$id（忽略）');
       }
     });
   }

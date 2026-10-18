@@ -1920,7 +1920,7 @@ class Renderer {
         if (idx < 0) {
           // 名字对不上时柱高为 0，很容易被当成“值为 0”，debug 下明确提示
           if (kDebugMode) {
-            debugPrint('Renderer: BarChart groups.series 里找不到名为 "$n" 的 series，该柱按 0 处理');
+            FlutterBridge.instance.reportUiIssue('BarChart: groups.series 里找不到名为 "$n" 的 series，该柱按 0 处理');
           }
           rods.add(BarChartRodData(
             toY: 0,

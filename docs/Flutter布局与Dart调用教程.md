@@ -377,7 +377,8 @@ flutter_debug(true)     -- 打开；flutter_debug(false) 关闭
 | 构建失败 | **只坏那一块**：该节点显示红框，其余照常渲染；异常经 `flutterError` 回传 |
 | 事件名提示 | 开启时列出可用事件：`flutterUiIssue` / `flutterError` / `renderError` / `dialogError` / `bottomSheetError` |
 
-- **关闭时**：未知控件静默降级，构建失败渲染成空（不给终端用户看红框），异常仍会回传 `flutterError`。
+- **关闭时（默认）：完全静默**——不打渲染/改属性诊断、不打句柄表、不打"没有处理器"提示；未知控件静默降级，构建失败渲染成空（不给终端用户看红框）。
+  例外：`flutterError` 事件仍会回传（那是错误，不是调试信息），`flutterHandlers()` 手动调用仍会打印。
 - **幂等**：重复开/关不重复打印，也不产生副作用。
 - 模块表里同样只有 `debug` 一个入口（`flutter.uiDebug` 已移除）。
 - **句柄表**：`flutterHandlers()` 可随时单独打印，输出形如

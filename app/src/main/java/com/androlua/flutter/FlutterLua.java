@@ -404,7 +404,7 @@ public class FlutterLua {
                 @Override
                 public void run() {
                     // 诊断事件直接打到 Lua 控制台（排查用）；其余事件照旧交给 Lua 处理器。
-                    if (json.contains("\"patchDiag\"")) {
+                    if (json.contains("\"patchDiag\"") && FlutterLuaBridge.isDebugEnabled()) {
                         LuaContext ctx = luaContextRef.get();
                         if (ctx != null) {
                             FlutterLuaBridge.luaPrint(ctx.getLuaState(), "[Dart] " + json);
@@ -421,9 +421,11 @@ public class FlutterLua {
             // 引擎刚启动时通道缓冲容量有限，渲染与命令式改属性连着下发时，
             // 先发的 render 会被后面的 patch 顶掉 → 界面停在占位。就绪后补发可解决。
             dartReady = true;
-            LuaContext ctx = luaContextRef.get();
-            if (ctx != null) {
-                FlutterLuaBridge.luaPrint(ctx.getLuaState(), "[Flutter] Dart 侧已就绪，补发渲染");
+            if (FlutterLuaBridge.isDebugEnabled()) {
+                LuaContext ctx = luaContextRef.get();
+                if (ctx != null) {
+                    FlutterLuaBridge.luaPrint(ctx.getLuaState(), "[Flutter] Dart 侧已就绪，补发渲染");
+                }
             }
             replayRender();
             result.success(null);

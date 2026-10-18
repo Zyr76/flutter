@@ -124,7 +124,7 @@ public final class FlutterLuaBridge {
                     logError("解析 spec 失败，命令式 h.X=值 暂不可用", e);
                 }
                 flutter.render(json);
-                luaPrint(L, "[Flutter] 已下发渲染：" + json.length() + " 字符");
+                luaDebug(L, "[Flutter] 已下发渲染：" + json.length() + " 字符");
                 bindIds(L, json);
 
                 LuaObject container = getParam(3);
@@ -261,7 +261,7 @@ public final class FlutterLuaBridge {
             public int execute() throws LuaException {
                 FlutterLua f = FlutterLua.peek(context);
                 if (f == null) {
-                    luaPrint(L, "[Flutter] 尚未渲染（无 Flutter 实例），无法改属性");
+                    luaDebug(L, "[Flutter] 尚未渲染（无 Flutter 实例），无法改属性");
                     return 0;
                 }
                 String id = L.toString(2);
@@ -276,9 +276,9 @@ public final class FlutterLuaBridge {
                     value = context.getLuaDir() + "/" + value;
                 }
                 if (f.patchNode(id, key, value)) {
-                    luaPrint(L, "[Flutter] 已改属性 " + id + "." + key + " = " + value);
+                    luaDebug(L, "[Flutter] 已改属性 " + id + "." + key + " = " + value);
                 } else {
-                    luaPrint(L, "[Flutter] 未找到 id=\"" + id + "\" 的节点，无法设置 " + key);
+                    luaDebug(L, "[Flutter] 未找到 id=\"" + id + "\" 的节点，无法设置 " + key);
                 }
                 return 0;
             }
@@ -363,7 +363,6 @@ public final class FlutterLuaBridge {
             @Override
             public int execute() throws LuaException {
                 DEBUG_EVENTS = !L.isNoneOrNil(2) && L.toBoolean(2);
-                luaPrint(L, DEBUG_EVENTS ? "[Flutter] 事件调试：开" : "[Flutter] 事件调试：关");
                 return 0;
             }
         };
@@ -691,7 +690,7 @@ public final class FlutterLuaBridge {
 
     /** 统计一下装了多少个带守卫的 Flutter 接口（只用于打印）。 */
     private static void reportRequireGuard(LuaState L) {
-        luaPrint(L, "[Flutter] 守卫已安装：未 require \"flutter\" 时调用渲染 API 会直接报错（共 "
+        luaDebug(L, "[Flutter] 守卫已安装：未 require \"flutter\" 时调用渲染 API 会直接报错（共 "
                 + FLUTTER_API_NAMES.size() + " 个接口名）");
     }
 
@@ -725,6 +724,18 @@ public final class FlutterLuaBridge {
             return s;
         } catch (Throwable t) {
             return "(exception: " + t.getMessage() + ")";
+        }
+    }
+
+    /** 调试开关是否打开（供 FlutterLua 判断要不要打诊断信息）。 */
+    static boolean isDebugEnabled() {
+        return DEBUG_EVENTS;
+    }
+
+    /** 调试输出：只有 flutter_debug(true) 打开时才打到 Lua 控制台；关闭时完全静默。 */
+    static void luaDebug(LuaState L, String msg) {
+        if (DEBUG_EVENTS) {
+            luaPrint(L, msg);
         }
     }
 
@@ -863,7 +874,7 @@ public final class FlutterLuaBridge {
                         }
                     }
                 } else if (!handled && evtName != null && !evtName.isEmpty()) {
-                    luaPrint(first, "[Flutter] 事件 \"" + evtName + "\" 没有任何处理器；"
+                    luaDebug(first, "[Flutter] 事件 \"" + evtName + "\" 没有任何处理器；"
                             + "可在同名全局函数、id 句柄的 onClick/onChange、或 收到Flutter事件 里处理");
                 }
             }
