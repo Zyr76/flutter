@@ -310,6 +310,16 @@ end)
 
 ---
 
+## 8.5 列表项里的布局注意
+
+- **列表项内不要写 `Expanded` / `Spacer`**：列表项的父约束不是 Flex，会直接抛
+  `Incorrect use of ParentDataWidget`。要占满宽度用 `width = "fill"`。
+- **不要写 `Positioned`**，除非该列表项本身就是 `Stack` 的子节点。
+- **懒加载列表尽量给每行一个 id**（如 `id = "row_$i"`）：渲染器用它作为 `KeyedSubtree` 的 key，
+  插入/删除时行内 State（输入框内容、滚动位置）才不会按位置错配。
+- **拖拽排序列表**：纯「template × itemCount」是按下标替换的，重排后行身份无法还原。
+  需要行状态随数据走，请改用**静态 children + 每个子节点写 id**。
+
 ## 9. 同一节点可被"具体回调"与"总监听"同时收到；`id` 需是合法 Lua 标识符
 
 - `id` 支持中文（如 `id="按钮"` → `function 按钮.onClick()`），也支持 `_` 与数字（非首位）。

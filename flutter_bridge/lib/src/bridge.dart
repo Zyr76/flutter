@@ -120,6 +120,11 @@ class FlutterBridge {
   ///  * 没写 type（如 `flutterShowDialog{ title=..., { Text,... } }`）→ 当 AlertDialog，
   ///    数字键的子节点合并到 content；
   ///  * 只给了一个内容节点（如 `flutterShowBottomSheet{ { Padding, ... } }`）→ 直接用那个节点。
+  /// 弹窗 spec 归一：
+  ///  * 已带 type 的原样返回；
+  ///  * 只含一个子节点时**直接渲染该节点、不包 AlertDialog 外壳**
+  ///    （`flutterShowDialog{ { Text, "hi" } }` 得到的是一行文字，不是对话框框体）；
+  ///  * 否则数字键的子节点收进 content/children，其余键当属性。
   static dynamic _dialogSpec(dynamic spec, {String type = 'AlertDialog'}) {
     if (spec is! Map) return spec;
     final m = spec.cast<String, dynamic>();

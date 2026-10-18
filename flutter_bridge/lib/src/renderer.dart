@@ -558,11 +558,21 @@ class Renderer {
                 ? SnackBarAction(label: (p['actionLabel'] ?? 'OK').toString(), onPressed: _tapHandler(p) ?? () {})
                 : null,
           );
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            final ctx = FlutterBridge.instance.navigatorKey.currentContext;
-            final messenger = ctx == null ? null : ScaffoldMessenger.maybeOf(ctx);
-            messenger?.showSnackBar(snack);
-          });
+          // 去重：build 每次重渲染都会走到这里，不去重会反复弹。
+          // 指纹取属性（内容文案/时长/行为），同一指纹 1.5 秒内只显示一次。
+          final fp = '${p.map['text'] ?? p.map['message'] ?? ''}|${p.map['duration'] ?? ''}'
+              '|${p.map['behavior'] ?? ''}|${p.n('width') ?? ''}';
+          final nowMs = DateTime.now().millisecondsSinceEpoch;
+          final dup = fp == _lastSnackKey && nowMs - _lastSnackAtMs < 1500;
+          _lastSnackKey = fp;
+          _lastSnackAtMs = nowMs;
+          if (!dup) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              final ctx = FlutterBridge.instance.navigatorKey.currentContext;
+              final messenger = ctx == null ? null : ScaffoldMessenger.maybeOf(ctx);
+              messenger?.showSnackBar(snack);
+            });
+          }
           result = const SizedBox.shrink();
         }
         break;
@@ -1305,10 +1315,16 @@ class Renderer {
             shrinkWrap: p.b('shrinkWrap'),
             buildDefaultDragHandles: p.b('buildDefaultDragHandles', true),
             itemCount: rCount,
-            itemBuilder: (ctx, i) => KeyedSubtree(
-              key: ValueKey('$path/ri$i'),
-              child: _build(rNeedsSubst ? _subst(rTemplate, i) : rTemplate, '$path/$i') ?? const SizedBox.shrink(),
-            ),
+            itemBuilder: (ctx, i) {
+              final node = rNeedsSubst ? _subst(rTemplate, i) : rTemplate;
+              // 优先用模板里的 id（如 id="row_$i"）；纯位置 key 在重排后会跟着位置走，
+              // 行内 State 会错位。要真正按数据身份保状态，请用静态 children + 每个子节点写 id。
+              final wid = node is Map ? node['id'] : null;
+              return KeyedSubtree(
+                key: ValueKey(wid?.toString() ?? '$path/ri$i'),
+                child: _build(node, '$path/$i') ?? const SizedBox.shrink(),
+              );
+            },
             onReorderItem: (a, b) => _emit(p['onReorder'], {'oldIndex': a, 'newIndex': b}, fallback: p.map),
           );
         } else {
@@ -1631,6 +1647,9 @@ class Renderer {
     // 模板式懒加载：给了 item/itemTemplate + itemCount 就按需构建；
     // 模板含 $index/$i 时才逐项替换（否则直接用原引用）。
     final bool lazy = template != null && count != null && count > 0;
+    if (count != null && count > 0 && template == null) {
+      FlutterBridge.instance.reportUiIssue('listview: 给了 itemCount=$count 但没有 itemTemplate/item，按静态 children 渲染');
+    }
     final needsSubst = lazy && _hasTemplateVar(template);
     return ListView.builder(
       controller: ctrl,
@@ -1645,9 +1664,17 @@ class Renderer {
       addRepaintBoundaries: p.b('addRepaintBoundaries', true),
       keyboardDismissBehavior: keyboardDismiss,
       itemCount: lazy ? count : children.length,
-      itemBuilder: (ctx, i) => lazy
-          ? (_build(needsSubst ? _subst(template, i) : template, '$path/$i') ?? const SizedBox.shrink())
-          : children[i],
+      itemBuilder: (ctx, i) {
+        if (!lazy) return children[i];
+        final node = needsSubst ? _subst(template, i) : template;
+        // 有 id 就用 id 做 key（模板里可写 id="row_$i"），否则退化为位置 key。
+        // 没有 key 时插入/删除会让行内 State（输入框内容等）按位置错配。
+        final wid = node is Map ? node['id'] : null;
+        return KeyedSubtree(
+          key: ValueKey(wid?.toString() ?? '$path/$i'),
+          child: _build(node, '$path/$i') ?? const SizedBox.shrink(),
+        );
+      },
     );
   }
 
@@ -1929,6 +1956,10 @@ class Renderer {
 
   /// 节点通用包装：visible / opacity / margin / tooltip / weight / width-height。
   /// 自己会处理这些属性的控件列在 _no*Wrap 里，避免重复注入。
+  /// SnackBar 去重指纹与时间戳（见 snackbar 分支）。
+  static String? _lastSnackKey;
+  static int _lastSnackAtMs = 0;
+
   static Widget _wrapCommon(Widget child, Props p) {
     Widget out = child;
     // 水波纹/高亮/hover/focus 与密度这类「主题级」属性：包一层 Theme，
@@ -2283,7 +2314,8 @@ class Renderer {
     final id = p['id'];
     if (id == null) return null;
     final sid = id.toString();
-    return () => FlutterBridge.instance.emit(sid, {'id': sid, 'type': type});
+    // 与 _voidCallback 的 payload 对齐：都带 type 与 action，Lua 侧可按同一种结构取值
+    return () => FlutterBridge.instance.emit(sid, {'id': sid, 'type': type, 'action': type});
   }
 
   /// DataTable 单元格：子节点或纯文本。
@@ -3066,39 +3098,24 @@ class _BridgeSearchBarState extends State<BridgeSearchBar> {
   }
 }
 
-/// 带边框的下拉表单字段（受控）：DropdownButtonFormField 的 initialValue 只在首帧生效，
-/// 这里用 ValueKey(_value) 强制重建来反映 spec 的 value 变化。
-class BridgeDropdownForm extends StatefulWidget {
+/// 带边框的下拉表单字段（纯受控）：显示值完全来自 spec 的 value。
+///
+/// DropdownButtonFormField 的 initialValue 只在首帧生效，因此用「key 只随 spec 的 value 变」
+/// 来触发重建。注意 key 不能跟着用户选择变——那会让每次选择都重建整个 FormField，
+/// 丢焦点和内部动画。
+class BridgeDropdownForm extends StatelessWidget {
   const BridgeDropdownForm({super.key, required this.p, required this.onChanged});
   final Props p;
   final ValueChanged<String?> onChanged;
-  @override
-  State<BridgeDropdownForm> createState() => _BridgeDropdownFormState();
-}
-
-class _BridgeDropdownFormState extends State<BridgeDropdownForm> {
-  late String? _value = widget.p.s('value');
-
-  @override
-  void didUpdateWidget(BridgeDropdownForm old) {
-    super.didUpdateWidget(old);
-    final next = widget.p.s('value');
-    if (next != old.p.s('value') && next != _value) setState(() => _value = next);
-  }
 
   @override
   Widget build(BuildContext context) {
-    final p = widget.p;
+    final value = p.s('value');
     return DropdownButtonFormField<String>(
-      key: ValueKey(_value),
-      initialValue: _value,
+      key: ValueKey(value),
+      initialValue: value,
       items: Renderer._dropdownItems(p['items']),
-      onChanged: p.b('enabled', true)
-          ? (v) {
-              setState(() => _value = v);
-              widget.onChanged(v);
-            }
-          : null,
+      onChanged: p.b('enabled', true) ? onChanged : null,
       decoration: InputDecoration(
         labelText: Renderer._decText(p, 'labelText'),
         border: const OutlineInputBorder(),
@@ -3220,6 +3237,9 @@ class FlutterControl {
   }
 
   /// 整页重建后告知当前 spec 里还有哪些 id。
+  /// 告知当前布局里还有哪些 id：全量 render 后调用，不在集合里的控制器才会被回收。
+  /// 注意：只在全量 render 路径调用；纯 patch 流程不重算，控制器回收依赖 _IdNode 的
+  /// retain/unmount 自愈。
   static void markAlive(Set<String> ids) {
     _alive = ids;
     _sweep();

@@ -57,6 +57,12 @@ jobs:
         working-directory: flutter_bridge
         run: flutter pub get
 
+      # 静态分析：只报告不阻断（历史问题较多，先让它可见，再逐步清零）
+      - name: Flutter analyze (非阻断)
+        working-directory: flutter_bridge
+        continue-on-error: true
+        run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings
+
       - name: Build Flutter AAR (release / AOT)
         working-directory: flutter_bridge
         run: flutter build aar --release --no-debug --no-profile --target-platform android-arm64
