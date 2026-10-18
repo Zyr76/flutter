@@ -308,6 +308,34 @@ public final class LuaOkHttp {
         void done(Response response, String body, String error, boolean canceled);
     }
 
+    /**
+     * 可取消句柄：重试会换新的 Call，取消必须转发到"当前那一个"，
+     * 否则用户取消的是已经失败掉的旧 Call，重试仍在跑。
+     */
+    /** all() 里各请求的结果（替代原来的 Object[] 打包）。 */
+    private static final class Result {
+        boolean ok;
+        int code;
+        String body;
+        String error;
+        boolean canceled;
+    }
+
+    public static final class Handle {
+        private volatile Call current;
+
+        void set(Call c) {
+            current = c;
+        }
+
+        public void cancel() {
+            Call c = current;
+            if (c != null) {
+                c.cancel();
+            }
+        }
+    }
+
     private static OkHttpClient clientFor(int timeoutMs, boolean forDownload) {
         if (timeoutMs <= 0) {
             return CLIENT;
@@ -323,7 +351,7 @@ public final class LuaOkHttp {
     }
 
     /** 构造请求（query / headers / form / body / json 由 Lua 侧编码成 body）。 */
-    private static Request buildRequest(LuaTable opts, String method, String url) throws IOException {
+    private static Request buildRequest(LuaTable opts, String method, String url, String tag) throws IOException {
         HttpUrl parsed = HttpUrl.parse(url);
         if (parsed == null) {
             throw new IOException("url 非法：" + url);
@@ -363,16 +391,41 @@ public final class LuaOkHttp {
         RequestBody body = null;
         Object form = opts.get("form");
         if (form instanceof LuaTable) {
+            StringBuilder formLog = new StringBuilder();
             FormBody.Builder fb = new FormBody.Builder();
             for (Object o : ((LuaTable<?, ?>) form).entrySet()) {
                 Map.Entry<?, ?> e = (Map.Entry<?, ?>) o;
-                if (e.getKey() != null && e.getValue() != null) {
-                    fb.add(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+                if (e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                String k = String.valueOf(e.getKey());
+                Object v = e.getValue();
+                if (v instanceof LuaTable) {
+                    // 与 query 对齐：数组值 → 同名参数多次
+                    LuaTable<?, ?> arr = (LuaTable<?, ?>) v;
+                    for (int i = 1; i <= arr.length(); i++) {
+                        String one = String.valueOf(arr.get((double) i));
+                        fb.add(k, one);
+                        formLog.append(k).append('=').append(one).append('&');
+                    }
+                } else {
+                    fb.add(k, String.valueOf(v));
+                    formLog.append(k).append('=').append(v).append('&');
                 }
             }
             body = fb.build();
             if (opts.get("method") == null) {
                 realMethod = "POST";
+            }
+            if (!bodyText.isEmpty()) {
+                // P1-4：两者同时给时 body 会被忽略，明确报出来而不是静默丢弃
+                emitLog(null, "error", "form 与 body 同时存在，body 被忽略");
+            }
+            String kv = formLog.length() > 0
+                    ? formLog.substring(0, formLog.length() - 1)
+                    : "";
+            if (DEBUG) {
+                log(null, "info", tag + " form: " + kv);
             }
             bodyText = "";
         } else if (!"GET".equals(method) && !"HEAD".equals(method) && !bodyText.isEmpty()) {
@@ -394,18 +447,37 @@ public final class LuaOkHttp {
             throw new IOException("响应体过大（" + len + " 字节，上限 " + MAX_IN_MEMORY + "），请用 ok.download");
         }
         String rt = str(opts, "responseType", "text").toLowerCase();
-        Object cs = opts.get("charset");
+        Object cs = opts == null ? null : opts.get("charset");
+        Charset charset;
         if ("bytes".equals(rt)) {
-            return new String(b.bytes(), Charset.forName("ISO-8859-1"));
+            charset = Charset.forName("ISO-8859-1");
+        } else if (cs != null) {
+            charset = Charset.forName(String.valueOf(cs));
+        } else {
+            // 跟随响应头里的 charset；没有就 UTF-8（原 b.string() 的行为）
+            MediaType mt = b.contentType();
+            Charset declared = mt == null ? null : mt.charset();
+            charset = declared == null ? Charset.forName("UTF-8") : declared;
         }
-        if (cs != null) {
-            return new String(b.bytes(), Charset.forName(String.valueOf(cs)));
+        // 边读边计数：chunked（contentLength = -1）时也能拦住超限，避免整体 OOM
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(
+                len > 0 ? (int) len : 8192);
+        InputStream in = b.byteStream();
+        byte[] buf = new byte[8192];
+        long total = 0;
+        int n;
+        while ((n = in.read(buf)) != -1) {
+            total += n;
+            if (total > MAX_IN_MEMORY) {
+                throw new IOException("响应体过大（已读 " + total + " 字节，上限 " + MAX_IN_MEMORY + "），请用 ok.download");
+            }
+            bos.write(buf, 0, n);
         }
-        return b.string();
+        return new String(bos.toByteArray(), charset);
     }
 
-    /** 执行一次请求（含重试），结果交给 sink。返回最后一次 Call。 */
-    private static Call exec(final LuaTable opts, final Sink sink) {
+    /** 执行一次请求（含重试），结果交给 sink。返回可取消句柄。 */
+    private static Handle exec(final LuaTable opts, final Sink sink) {
         final String tag = UUID.randomUUID().toString().substring(0, 8);
         String method = str(opts, "method", "GET").toUpperCase();
         final String url = str(opts, "url", "").trim();
@@ -419,7 +491,7 @@ public final class LuaOkHttp {
 
         Call call;
         try {
-            final Request req = buildRequest(opts, method, url);
+            final Request req = buildRequest(opts, method, url, tag);
             Object to = opts.get("timeout");
             call = clientFor(to instanceof Number ? ((Number) to).intValue() : 0, false).newCall(req);
             if (DEBUG) {
@@ -430,14 +502,15 @@ public final class LuaOkHttp {
             return null;
         }
 
-        final Call first = call;
+        final Handle handle = new Handle();
+        handle.set(call);
         final int[] left = {idempotent ? retries : 0};
-        enqueue(call, opts, tag, sink, left);
-        return first;
+        enqueue(call, opts, tag, sink, left, handle);
+        return handle;
     }
 
     private static void enqueue(final Call call, final LuaTable opts, final String tag,
-                                final Sink sink, final int[] left) {
+                                final Sink sink, final int[] left, final Handle handle) {
         call.enqueue(new Callback() {
             @Override
             public void onFailure(Call c, IOException e) {
@@ -452,7 +525,8 @@ public final class LuaOkHttp {
                         Object to = opts.get("timeout");
                         Call again = clientFor(to instanceof Number ? ((Number) to).intValue() : 0, false)
                                 .newCall(c.request());
-                        enqueue(again, opts, tag, sink, left);
+                        handle.set(again);          // 取消转发到重试后的 Call
+                        enqueue(again, opts, tag, sink, left, handle);
                         return;
                     } catch (Exception ignored) {
                     }
@@ -483,7 +557,7 @@ public final class LuaOkHttp {
      * opts：method / url / query / headers / form / body / contentType / json / timeout /
      *       retries / responseType / charset
      */
-    public static Call request(LuaTable opts, final LuaObject callback) {
+    public static Handle request(LuaTable opts, final LuaObject callback) {
         if (opts == null || callback == null) {
             throw new IllegalArgumentException("okhttp.request(opts, callback)：两个参数都必填");
         }
@@ -501,7 +575,7 @@ public final class LuaOkHttp {
             throw new IllegalArgumentException("okhttp.all(reqs, callback)：两个参数都必填");
         }
         final int n = reqs.length();
-        final Object[] slots = new Object[n + 1];
+        final Result[] slots = new Result[n + 1];
         final AtomicInteger left = new AtomicInteger(n);
         if (n == 0) {
             deliverAll(callback, slots, 0);
@@ -510,7 +584,9 @@ public final class LuaOkHttp {
         for (int i = 1; i <= n; i++) {
             final Object item = reqs.get((double) i);
             if (!(item instanceof LuaTable)) {
-                slots[i] = new String[]{"参数不是表"};
+                Result bad = new Result();
+                bad.error = "参数不是表";
+                slots[i] = bad;
                 if (left.decrementAndGet() == 0) {
                     deliverAll(callback, slots, n);
                 }
@@ -520,9 +596,16 @@ public final class LuaOkHttp {
             exec((LuaTable) item, new Sink() {
                 @Override
                 public void done(Response response, String body, String error, boolean canceled) {
-                    slots[idx] = response == null
-                            ? new Object[]{Boolean.FALSE, error, canceled}
-                            : new Object[]{Boolean.TRUE, (double) response.code(), body};
+                    Result r = new Result();
+                    if (response == null) {
+                        r.error = error;
+                        r.canceled = canceled;
+                    } else {
+                        r.ok = true;
+                        r.code = response.code();
+                        r.body = body;
+                    }
+                    slots[idx] = r;
                     if (response != null) {
                         response.close();
                     }
@@ -534,7 +617,7 @@ public final class LuaOkHttp {
         }
     }
 
-    private static void deliverAll(final LuaObject callback, final Object[] slots, final int n) {
+    private static void deliverAll(final LuaObject callback, final Result[] slots, final int n) {
         MAIN.post(new Runnable() {
             @Override
             public void run() {
@@ -543,22 +626,19 @@ public final class LuaOkHttp {
                     LuaTable<Object, Object> out = new LuaTable<Object, Object>(L);
                     for (int i = 1; i <= n; i++) {
                         LuaTable<Object, Object> one = new LuaTable<Object, Object>(L);
-                        Object s = slots[i];
-                        if (s instanceof Object[]) {
-                            Object[] a = (Object[]) s;
-                            if (a.length == 3 && a[0] instanceof Boolean && (Boolean) a[0]) {
-                                one.put("ok", Boolean.TRUE);
-                                one.put("code", a[1]);
-                                one.put("body", a[2]);
-                            } else if (a.length == 3) {
-                                one.put("ok", Boolean.FALSE);
-                                one.put("error", a[1]);
-                                if (a[2] instanceof Boolean && (Boolean) a[2]) {
-                                    one.put("canceled", Boolean.TRUE);
-                                }
-                            } else {
-                                one.put("ok", Boolean.FALSE);
-                                one.put("error", a[0]);
+                        Result r = slots[i];
+                        if (r == null) {
+                            one.put("ok", Boolean.FALSE);
+                            one.put("error", "无结果");
+                        } else if (r.ok) {
+                            one.put("ok", Boolean.TRUE);
+                            one.put("code", (double) r.code);
+                            one.put("body", r.body == null ? "" : r.body);
+                        } else {
+                            one.put("ok", Boolean.FALSE);
+                            one.put("error", r.error);
+                            if (r.canceled) {
+                                one.put("canceled", Boolean.TRUE);
                             }
                         }
                         out.put((double) i, one);
@@ -572,24 +652,31 @@ public final class LuaOkHttp {
     }
 
     /** [09] 断点续传下载：[04] 用 readTimeout 作为"多久没收到数据"的上限。 */
-    public static Call download(String url, String path, LuaObject callback) {
+    public static Handle download(String url, String path, LuaObject callback) {
         return download(url, path, callback, 0, null, false);
     }
 
-    public static Call download(String url, String path, LuaObject callback, int timeoutMs, LuaObject onProgress) {
+    public static Handle download(String url, String path, LuaObject callback, int timeoutMs, LuaObject onProgress) {
         return download(url, path, callback, timeoutMs, onProgress, false);
     }
 
-    public static Call download(final String url, final String path, final LuaObject callback,
-                                int timeoutMs, final LuaObject onProgress, boolean resume) {
+    public static Handle download(final String url, final String path, final LuaObject callback,
+                                  int timeoutMs, final LuaObject onProgress, boolean resume) {
         if (url == null || path == null || callback == null) {
             throw new IllegalArgumentException("okhttp.download(url, path, callback)：参数必填");
         }
-        final File out = new File(path);
+        final File target = new File(path);
+        // P1-6：续传写在 .part 上，成功才改成正式文件——避免把上次的错误响应体当成本次起点
+        final File out = resume ? new File(path + ".part") : target;
         final long offset = (resume && out.isFile()) ? out.length() : 0;
         Request.Builder rb;
         try {
-            rb = new Request.Builder().url(HttpUrl.parse(url) == null ? url : HttpUrl.parse(url).toString());
+            HttpUrl u = HttpUrl.parse(url);     // P2-4：只解析一次
+            if (u == null) {
+                deliver(callback, null, null, "url 非法：" + url, false);
+                return null;
+            }
+            rb = new Request.Builder().url(u);
         } catch (Exception e) {
             deliver(callback, null, null, "url 非法：" + msg(e), false);
             return null;
@@ -614,7 +701,9 @@ public final class LuaOkHttp {
             public void onResponse(Call c, Response response) {
                 boolean appending = offset > 0 && response.code() == 206;
                 if (!response.isSuccessful() && response.code() != 206) {
-                    deliver(callback, null, null, "HTTP " + response.code(), false);
+                    int code = response.code();
+                    response.close();               // P0-1：不关会泄漏连接
+                    deliver(callback, null, null, "HTTP " + code, false);
                     return;
                 }
                 File parent = out.getParentFile();
@@ -639,6 +728,10 @@ public final class LuaOkHttp {
                     int n;
                     while ((n = in.read(buf)) != -1) {
                         if (c.isCanceled()) {
+                            // P1-1：非续传时删掉半截文件；续传保留 .part 供下次接着下
+                            if (!resume) {
+                                out.delete();
+                            }
                             deliver(callback, null, null, "已取消", true);
                             return;
                         }
@@ -650,26 +743,39 @@ public final class LuaOkHttp {
                             reportProgress(onProgress, total, expected);
                         }
                     }
-                    if (onProgress != null) {
+                    // P3-2：收尾进度只在"最后一次不是刚刚才报过"时补，避免连着两次
+                    if (onProgress != null && System.currentTimeMillis() - lastPost >= 50) {
                         reportProgress(onProgress, total, expected);
                     }
                 } catch (IOException e) {
                     deliver(callback, null, null, "写入失败：" + msg(e), false);
                     return;
                 }
-                deliverDownload(callback, out.getAbsolutePath(), total, null);
+                if (resume) {
+                    if (target.exists() && !target.delete()) {
+                        deliver(callback, null, null, "覆盖目标文件失败：" + target, false);
+                        return;
+                    }
+                    if (!out.renameTo(target)) {
+                        deliver(callback, null, null, "改名失败：" + out + " → " + target, false);
+                        return;
+                    }
+                }
+                deliverDownload(callback, target.getAbsolutePath(), total, null);
             }
         });
-        return call;
+        Handle handle = new Handle();
+        handle.set(call);
+        return handle;
     }
 
     /** 单文件上传（multipart）。 */
-    public static Call upload(String url, String field, String filePath, LuaObject callback) {
+    public static Handle upload(String url, String field, String filePath, LuaObject callback) {
         return upload(url, field, filePath, callback, 0);
     }
 
-    public static Call upload(final String url, final String field, final String filePath,
-                              final LuaObject callback, final int timeoutMs) {
+    public static Handle upload(final String url, final String field, final String filePath,
+                                final LuaObject callback, final int timeoutMs) {
         if (url == null || filePath == null || callback == null) {
             throw new IllegalArgumentException("okhttp.upload(url, field, filePath, callback)：参数必填");
         }
@@ -681,13 +787,13 @@ public final class LuaOkHttp {
         MultipartBody body = new MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart(field == null || field.isEmpty() ? "file" : field, f.getName(),
-                        RequestBody.create(OCTET, f))
+                        RequestBody.create(mimeOf(f.getPath()), f))
                 .build();
         return postMultipart(url, body, timeoutMs, callback);
     }
 
     /** [10] 多文件 + 普通字段上传：files = { {field=,path=}, ... }，fields = { k=v }。 */
-    public static Call uploadMany(String url, LuaTable files, LuaTable fields, LuaObject callback) {
+    public static Handle uploadMany(String url, LuaTable files, LuaTable fields, LuaObject callback) {
         if (url == null || callback == null) {
             throw new IllegalArgumentException("okhttp.uploadMany(url, files, fields, callback)：参数必填");
         }
@@ -707,7 +813,7 @@ public final class LuaOkHttp {
                     return null;
                 }
                 String name = str(f, "field", "file");
-                mb.addFormDataPart(name, file.getName(), RequestBody.create(OCTET, file));
+                mb.addFormDataPart(name, file.getName(), RequestBody.create(mimeOf(file.getPath()), file));
             }
         }
         if (fields != null) {
@@ -721,7 +827,7 @@ public final class LuaOkHttp {
         return postMultipart(url, mb.build(), 0, callback);
     }
 
-    private static Call postMultipart(String url, RequestBody body, final int timeoutMs, final LuaObject callback) {
+    private static Handle postMultipart(String url, RequestBody body, final int timeoutMs, final LuaObject callback) {
         final Call call;
         try {
             call = clientFor(timeoutMs, false).newCall(new Request.Builder().url(url).post(body).build());
@@ -748,10 +854,43 @@ public final class LuaOkHttp {
                 deliver(callback, response, text, null, false);
             }
         });
-        return call;
+        Handle handle = new Handle();
+        handle.set(call);
+        return handle;
     }
 
     // ---------- 工具 ----------
+    /** P2-1：按扩展名推断上传用的 MediaType。 */
+    private static MediaType mimeOf(String path) {
+        String p = path == null ? "" : path.toLowerCase();
+        int dot = p.lastIndexOf('.');
+        String ext = dot < 0 ? "" : p.substring(dot + 1);
+        switch (ext) {
+            case "jpg":
+            case "jpeg":
+                return MediaType.parse("image/jpeg");
+            case "png":
+                return MediaType.parse("image/png");
+            case "gif":
+                return MediaType.parse("image/gif");
+            case "webp":
+                return MediaType.parse("image/webp");
+            case "txt":
+                return MediaType.parse("text/plain; charset=utf-8");
+            case "json":
+                return MediaType.parse("application/json; charset=utf-8");
+            case "html":
+            case "htm":
+                return MediaType.parse("text/html; charset=utf-8");
+            case "mp4":
+                return MediaType.parse("video/mp4");
+            case "mp3":
+                return MediaType.parse("audio/mpeg");
+            default:
+                return OCTET;
+        }
+    }
+
     private static String str(LuaTable<?, ?> t, String key, String def) {
         if (t == null) {
             return def;
@@ -791,8 +930,11 @@ public final class LuaOkHttp {
                         LuaObject print = L.getLuaObject("print");
                         if (print != null && print.isFunction()) {
                             print.call("[okhttp] " + message);
+                            return;
                         }
                     }
+                    // P3-1：既没有 logger 也拿不到 Lua 状态时，退回控制台
+                    System.out.println("[okhttp] " + message);
                 } catch (Exception ignored) {
                 }
             }
@@ -805,7 +947,8 @@ public final class LuaOkHttp {
             public void run() {
                 try {
                     onProgress.call((double) received, (double) total);
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    emitLog(null, "error", "进度回调出错：" + msg(e));   // P3-3
                 }
             }
         });
