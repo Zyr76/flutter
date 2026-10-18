@@ -367,7 +367,7 @@ flutter_debug(true)     -- 打开；flutter_debug(false) 关闭
                         -- 中文别名 Flutter调试(true) 同样可用
 ```
 
-一个开关同时控制两侧（`flutterDebug` / `调试Flutter事件` / `flutterUI_debug` 都已是它的别名，行为一致）：
+一个开关同时控制两侧（事件调试 + UI 调试）。**唯一的别名是 `Flutter调试`**——`flutterDebug` / `调试Flutter事件` / `flutterUI_debug` 已移除，避免出现“两个开关各控一半”：
 
 | 能力 | 表现 |
 |---|---|
@@ -379,6 +379,7 @@ flutter_debug(true)     -- 打开；flutter_debug(false) 关闭
 
 - **关闭时**：未知控件静默降级，构建失败渲染成空（不给终端用户看红框），异常仍会回传 `flutterError`。
 - **幂等**：重复开/关不重复打印，也不产生副作用。
+- 模块表里同样只有 `debug` 一个入口（`flutter.uiDebug` 已移除）。
 - **句柄表**：`flutterHandlers()` 可随时单独打印，输出形如
   `sw2 => onChange(function) | btn => onClick(function)`；**某个 id 显示 `(空)`** = 那个回调没写进去（常见原因：它前面的语句报错，后面的赋值没执行）。
 - 也可以直接回读：`print(sw.onChange)` —— 是 `function: 0x...` 说明注册成功，`nil` 说明没写进去。

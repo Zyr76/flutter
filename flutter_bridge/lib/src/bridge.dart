@@ -73,7 +73,7 @@ class FlutterBridge {
   /// dartCall 的逻辑方法表：名字 -> 函数(参数 map) -> 可 JSON 序列化的返回值。
   final Map<String, dynamic Function(Map<String, dynamic>? args)> handlers = {};
 
-  /// UI 调试总开关（Lua 侧 `flutterUI_debug(true)` 打开）。
+  /// UI 调试总开关（Lua 侧 `flutter_debug(true)` 打开，事件调试也由同一个入口设置）。
   /// 开启后：未知控件告警、构建错误显示红框、Flutter 异常回传 Lua。
   bool uiDebug = false;
 

@@ -21,7 +21,7 @@ import "android.widget.*"
 import "android.view.*"
 
 -- 调试时改成 true：会打印每个事件的 name/命中情况，便于排查
-flutterDebug(false)
+flutter_debug(false)
 
 -- ============================================================
 -- 1) 配置

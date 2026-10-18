@@ -26,9 +26,9 @@ local REPLACEMENTS = {
   { "显示提示", "ZTOAST" },
   { "加载Flutter布局", "ZRENDER" },
   { "渲染Flutter", "ZRENDER" },
-  { "flutterDebug", "ZDEBUG" },
+  { "flutter_debug", "ZDEBUG" },
   { "Flutter调试", "ZDEBUG" },
-  { "Flutter句柄表", "ZHANDLERS" },
+  { "flutterHandlers", "ZHANDLERS" },
 }
 for _, r in ipairs(REPLACEMENTS) do
   src = src:gsub(r[1], r[2])

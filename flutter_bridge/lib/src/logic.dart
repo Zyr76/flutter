@@ -21,8 +21,8 @@ void registerDefaultHandlers(
   // 统一控制入口：{ id, action, ... }
   handlers['flutterControl'] = FlutterControl.call;
 
-  // UI 调试总开关（未知控件告警 / 错误红框 / 错误事件）
-  handlers['flutterUIDebug'] = (args) {
+  // UI 调试总开关（未知控件告警 / 错误红框 / 错误事件），由 Lua 的 flutter_debug 统一设置
+  handlers['flutterSetDebug'] = (args) {
     FlutterBridge.instance.setUiDebug(args?['enabled'] == true);
     return {'ok': true};
   };

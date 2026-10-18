@@ -358,7 +358,7 @@ public final class FlutterLuaBridge {
         };
         reg(closeDialog, "flutterCloseDialog", "关闭对话框");
 
-        // ---- flutterDebug(true/false) ---- 事件调试开关，把每个事件的到达/处理情况打到控制台
+        // ---- __flutter_event_debug(true/false) ---- 内部事件调试开关（对外入口是 flutter.lua 的 flutter_debug）
         JavaFunction debug = new JavaFunction(L) {
             @Override
             public int execute() throws LuaException {
@@ -367,7 +367,8 @@ public final class FlutterLuaBridge {
                 return 0;
             }
         };
-        reg(debug, "flutterDebug", "Flutter调试", "调试Flutter事件");
+        // 内部名（__ 前缀不参与 require 守卫）：对外只暴露 flutter.lua 里的 flutter_debug
+        reg(debug, "__flutter_event_debug");
 
         // ---- flutterHandlers() ---- 打印 __flutter_handlers 里已注册的 id 与回调（诊断用）
         JavaFunction dumpHandlers = new JavaFunction(L) {
@@ -377,7 +378,7 @@ public final class FlutterLuaBridge {
                 return 0;
             }
         };
-        reg(dumpHandlers, "flutterHandlers", "Flutter句柄表", "dumpFlutterHandlers");
+        reg(dumpHandlers, "flutterHandlers");
 
         // 统一守卫：未 require "flutter" 就调用 Flutter API → 直接报错（而不是悄悄不生效）
         reportRequireGuard(L);
@@ -703,7 +704,7 @@ public final class FlutterLuaBridge {
         }
     }
 
-    /** 事件调试开关：Lua 里调 flutterDebug(true) / Flutter调试(true) 打开，会把每个事件的到达与处理情况打到控制台。 */
+    /** 事件调试开关（由 flutter.lua 的 flutter_debug 统一设置），会把每个事件的到达与处理情况打到控制台。 */
     private static volatile boolean DEBUG_EVENTS = false;
 
     /** 读取 Lua 侧 __flutter_handlers 摘要（诊断用）。 */
@@ -848,7 +849,7 @@ public final class FlutterLuaBridge {
                 }
                 handled = fnHandled || idHandled || anyHandled;
 
-                // 诊断：开了 flutterDebug(true) 就报告每个事件；否则只在“没人处理”时提示一次，
+                // 诊断：开了 flutter_debug(true) 就报告每个事件；否则只在“没人处理”时提示一次，
                 // 避免“点了没反应、又没有任何线索”。
                 LuaState first = states.isEmpty() ? null : states.get(0);
                 if (DEBUG_EVENTS) {
