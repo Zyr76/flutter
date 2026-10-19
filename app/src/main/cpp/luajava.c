@@ -138,6 +138,7 @@ Java_com_androlua_LuaX_encrypt(JNIEnv *env, jclass clazz, jbyteArray data) {
     uint8_t *plain, *out;
     jbyteArray ret;
     size_t total;
+    int is_bytecode;
 
     (void)clazz;
     if (n <= 0) {
@@ -166,11 +167,14 @@ Java_com_androlua_LuaX_encrypt(JNIEnv *env, jclass clazz, jbyteArray data) {
 
     memcpy(plain, src, (size_t)n);
     (*env)->ReleaseByteArrayElements(env, data, src, JNI_ABORT);
+    /* 自动识别 Lua 字节码头（\x1bLua），打包装的是 console.build 编译后的字节码 */
+    is_bytecode = (n >= 4 && plain[0] == 0x1b
+                   && memcmp(plain + 1, "Lua", 3) == 0) ? 1 : 0;
     chacha20_xor(plain, (size_t)n, LUAX_KEY, nonce, 1);
 
     memcpy(out, LUAX_MAGIC, 4);
     out[4] = (uint8_t)LUAX_VERSION;
-    out[5] = 0;                      /* 源码文本，不是字节码 */
+    out[5] = is_bytecode ? LUAX_FLAG_BYTECODE : 0;
     out[6] = 0;
     out[7] = 0;
     memcpy(out + 8, nonce, 12);
