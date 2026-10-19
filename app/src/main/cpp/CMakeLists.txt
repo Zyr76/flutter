@@ -32,6 +32,7 @@ list(REMOVE_ITEM LUA_SOURCES
 # 创建共享库
 add_library(luajava SHARED
     luajava.c
+    chacha20.c
     
     ${LUA_SOURCES}
 )

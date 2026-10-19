@@ -43,6 +43,72 @@
 #include "lauxlib.h"
 
 #include "luajava.h"
+#include "chacha20.h"
+
+/* ================= LUAX 加密脚本支持 ================= */
+#define LUAX_MAGIC        "LUAX"
+#define LUAX_HDR          24
+#define LUAX_VERSION      0x55
+#define LUAX_FLAG_BYTECODE 1
+
+/* 演示密钥：正式发布前务必替换，并按文档建议拆成「so 常量 + 运行时派生」两片 */
+static const uint8_t LUAX_KEY[32] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+};
+
+static int luax_is_encrypted(const char *s, size_t n) {
+    return n >= LUAX_HDR && memcmp(s, LUAX_MAGIC, 4) == 0;
+}
+
+/* 成功返回 LUA_OK；失败返回错误码并把错误消息留在栈顶 */
+static int luax_load(lua_State *L, const char *s, size_t n,
+                     const char *chunkname) {
+    const uint8_t *p = (const uint8_t *)s;
+    uint32_t plain_len;
+    uint8_t *plain;
+    size_t body_len;
+    int mode, rc;
+
+    if (!luax_is_encrypted(s, n)) {
+        lua_pushliteral(L, "LUAX: 头部校验失败");
+        return LUA_ERRSYNTAX;
+    }
+    if (p[4] != LUAX_VERSION) {
+        lua_pushfstring(L, "LUAX: 版本不匹配（文件 %d，运行时 %d）",
+                        (int)p[4], (int)LUAX_VERSION);
+        return LUA_ERRSYNTAX;
+    }
+    plain_len = (uint32_t)p[20] | ((uint32_t)p[21] << 8)
+              | ((uint32_t)p[22] << 16) | ((uint32_t)p[23] << 24);
+    body_len = n - LUAX_HDR;
+    if (plain_len == 0 || (size_t)plain_len != body_len) {
+        lua_pushliteral(L, "LUAX: 长度字段与文件实际大小不符");
+        return LUA_ERRSYNTAX;
+    }
+    mode = (p[5] & LUAX_FLAG_BYTECODE) ? 1 : 0;
+    if (mode && n > (size_t)0x7fffffff) {
+        lua_pushliteral(L, "LUAX: 密文过大");
+        return LUA_ERRMEM;
+    }
+
+    plain = (uint8_t *)malloc(plain_len);
+    if (plain == NULL) {
+        lua_pushliteral(L, "LUAX: 解密缓冲分配失败");
+        return LUA_ERRMEM;
+    }
+    memcpy(plain, p + LUAX_HDR, plain_len);
+    chacha20_xor(plain, plain_len, LUAX_KEY, p + 8, 1);
+    rc = luaL_loadbufferx(L, (const char *)plain, plain_len, chunkname,
+                          mode ? "b" : "t");
+    memset(plain, 0, plain_len);
+    free(plain);
+    return rc;
+}
+/* ==================================================== */
+
 /* Call metamethod name */
 #define LUACALLMETAMETHODTAG "__call"
 #define LUATOSTRINGMETAMETHODTAG "__tostring"
@@ -3492,6 +3558,14 @@ Java_com_luajava_LuaState__1LloadFile(JNIEnv *env, jobject jobj, jlong cptr,
     if (luajava_read_file(fn, &source) == 0) {
         script_source = source.data != NULL ? source.data : "";
         script_size = source.size;
+        /* 加密脚本是二进制，必须在 @cpp 文本预处理之前分流 */
+        if (luax_is_encrypted(script_source, script_size)) {
+            ret = luax_load(L, script_source, script_size, fn);
+            luajava_text_buffer_free(&transformed);
+            luajava_text_buffer_free(&source);
+            (*env)->ReleaseStringUTFChars(env, fileName, fn);
+            return (jint) ret;
+        }
         if (luajava_contains_bytes(script_source, script_size, LUAJAVA_CPP_BLOCK_START)) {
             if (luajava_preprocess_hybrid_script(script_source, script_size, &transformed, &has_hybrid, &hybrid_error) == 0) {
                 if (has_hybrid) {
@@ -3531,7 +3605,11 @@ Java_com_luajava_LuaState__1LloadBuffer(JNIEnv *env, jobject jobj, jlong cptr,
     const char *name = (*env)->GetStringUTFChars(env, n, NULL);
     int ret;
 
-    ret = luaL_loadbuffer(L, (const char *) cBuff, (int) sz, name);
+    if (luax_is_encrypted((const char *)cBuff, (size_t)sz)) {
+        ret = luax_load(L, (const char *)cBuff, (size_t)sz, name);
+    } else {
+        ret = luaL_loadbuffer(L, (const char *) cBuff, (int) sz, name);
+    }
 
     (*env)->ReleaseStringUTFChars(env, n, name);
 
@@ -3552,7 +3630,17 @@ Java_com_luajava_LuaState__1LloadString(JNIEnv *env, jobject jobj, jlong cptr,
     const char *fn = (*env)->GetStringUTFChars(env, str, NULL);
     int ret;
 
-    ret = luaL_loadstring(L, fn);
+    if (luax_is_encrypted(fn, strlen(fn))) {
+        /* Java String 只能可靠承载文本，加密字节码请走 LloadFile / LloadBuffer */
+        if (((const uint8_t *)fn)[5] & LUAX_FLAG_BYTECODE) {
+            lua_pushliteral(L, "LUAX: LloadString 不支持加密字节码，请用 LloadFile");
+            ret = LUA_ERRSYNTAX;
+        } else {
+            ret = luax_load(L, fn, strlen(fn), "=(loadstring)");
+        }
+    } else {
+        ret = luaL_loadstring(L, fn);
+    }
 
     (*env)->ReleaseStringUTFChars(env, str, fn);
 
