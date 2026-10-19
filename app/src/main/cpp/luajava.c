@@ -44,6 +44,8 @@
 
 #include "luajava.h"
 #include "chacha20.h"
+#include <fcntl.h>
+#include <unistd.h>
 
 /* ================= LUAX 加密脚本支持 ================= */
 #define LUAX_MAGIC        "LUAX"
@@ -53,10 +55,10 @@
 
 /* 演示密钥：正式发布前务必替换，并按文档建议拆成「so 常量 + 运行时派生」两片 */
 static const uint8_t LUAX_KEY[32] = {
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
+        0x69,     0x79,     0x57,     0x7a,     0xd6,     0x04,     0x77,     0x57,
+        0x5e,     0xe3,     0x16,     0xe0,     0x0b,     0xbc,     0xcf,     0x00,
+        0x66,     0xd6,     0xda,     0x4a,     0xbf,     0x63,     0xec,     0x57,
+        0xc8,     0x85,     0x4c,     0xc1,     0x7c,     0xe4,     0xbb,     0x7b
 };
 
 static int luax_is_encrypted(const char *s, size_t n) {
@@ -108,6 +110,84 @@ static int luax_load(lua_State *L, const char *s, size_t n,
     return rc;
 }
 /* ==================================================== */
+
+/* 打包模块调用：源码文本 -> LUAX 密文。nonce 用 /dev/urandom 随机生成。 */
+static int luax_random_nonce(uint8_t nonce[12]) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    size_t got = 0;
+    if (fd < 0) {
+        return 0;
+    }
+    while (got < 12) {
+        ssize_t n = read(fd, nonce + got, 12 - got);
+        if (n <= 0) {
+            close(fd);
+            return 0;
+        }
+        got += (size_t)n;
+    }
+    close(fd);
+    return 1;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_androlua_LuaX_encrypt(JNIEnv *env, jclass clazz, jbyteArray data) {
+    jsize n = (*env)->GetArrayLength(env, data);
+    jbyte *src;
+    uint8_t nonce[12];
+    uint8_t *plain, *out;
+    jbyteArray ret;
+    size_t total;
+
+    (void)clazz;
+    if (n <= 0) {
+        return NULL;
+    }
+    if (!luax_random_nonce(nonce)) {
+        return NULL;                 /* 拿不到随机数就失败，绝不用固定 nonce */
+    }
+    src = (*env)->GetByteArrayElements(env, data, NULL);
+    if (src == NULL) {
+        return NULL;
+    }
+    total = (size_t)LUAX_HDR + (size_t)n;
+    plain = (uint8_t *)malloc((size_t)n);
+    out = (uint8_t *)malloc(total);
+    ret = (*env)->NewByteArray(env, (jsize)total);
+    if (plain == NULL || out == NULL || ret == NULL) {
+        free(plain);
+        free(out);
+        if (ret != NULL) {
+            (*env)->DeleteLocalRef(env, ret);
+        }
+        (*env)->ReleaseByteArrayElements(env, data, src, JNI_ABORT);
+        return NULL;
+    }
+
+    memcpy(plain, src, (size_t)n);
+    (*env)->ReleaseByteArrayElements(env, data, src, JNI_ABORT);
+    chacha20_xor(plain, (size_t)n, LUAX_KEY, nonce, 1);
+
+    memcpy(out, LUAX_MAGIC, 4);
+    out[4] = (uint8_t)LUAX_VERSION;
+    out[5] = 0;                      /* 源码文本，不是字节码 */
+    out[6] = 0;
+    out[7] = 0;
+    memcpy(out + 8, nonce, 12);
+    out[20] = (uint8_t)((uint32_t)n);
+    out[21] = (uint8_t)((uint32_t)n >> 8);
+    out[22] = (uint8_t)((uint32_t)n >> 16);
+    out[23] = (uint8_t)((uint32_t)n >> 24);
+    memcpy(out + LUAX_HDR, plain, (size_t)n);
+
+    (*env)->SetByteArrayRegion(env, ret, 0, (jsize)total, (const jbyte *)out);
+    memset(plain, 0, (size_t)n);
+    memset(out, 0, total);
+    free(plain);
+    free(out);
+    return ret;
+}
+
 
 /* Call metamethod name */
 #define LUACALLMETAMETHODTAG "__call"

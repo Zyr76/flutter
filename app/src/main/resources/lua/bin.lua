@@ -1,4 +1,5 @@
 require "import"
+import "com.androlua.LuaX"
 import "java.util.zip.ZipOutputStream"
 import "android.net.Uri"
 import "java.io.File"
@@ -85,8 +86,8 @@ local function binapk(luapath, apkpath)
     end
 
     local function copy_compiled_lua(path, output)
-        local input = FileInputStream(File(path))
-        copy(input, output)
+        -- 打包时把脚本加密成 LUAX；含 @cpp 预处理块的文件由 LuaX 自动跳过（保持明文）
+        LuaX.copyEncrypted(path, output)
     end
 
     local temp = File(apkpath).getParentFile();

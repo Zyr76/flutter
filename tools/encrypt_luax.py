@@ -20,8 +20,8 @@ import os
 import struct
 import sys
 
-# 必须与 luajava.c 里的 LUAX_KEY_HEX 完全一致
-KEY_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+# 必须与 luajava.c 里的 LUAX_KEY 完全一致
+KEY_HEX = "6979577ad60477575ee316e00bbccf0066d6da4abf63ec57c8854cc17ce4bb7b"
 
 MAGIC = b"LUAX"
 VERSION = 0x55

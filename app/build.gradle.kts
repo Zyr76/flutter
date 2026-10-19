@@ -56,6 +56,34 @@ android {
     }
 }
 
+// ---- LUAX 加密脚本 ----
+// 把 src/main/luax/ 下自己写的 .lua 加密后，作为额外 assets 目录打进 APK。
+// 项目自带的 assets/*.lua 保持明文，不受影响。
+// 源目录为空时任务照常成功，等价于不启用；加密失败会让构建中断（宁可失败也不发明文）。
+val luaxSrcDir = file("src/main/luax")
+val luaxGenDir = layout.buildDirectory.dir("generated/luax_assets")
+
+val encryptLuaxScripts by tasks.registering(Exec::class) {
+    val outDir = luaxGenDir.get().asFile
+    doFirst { outDir.mkdirs() }
+    inputs.dir(luaxSrcDir)
+    outputs.dir(outDir)
+    commandLine(
+        "python3",
+        rootProject.file("tools/encrypt_dir.py").absolutePath,
+        luaxSrcDir.absolutePath,
+        outDir.absolutePath
+    )
+}
+
+android {
+    sourceSets["main"].assets.srcDir(luaxGenDir)
+}
+
+tasks.named("preBuild") {
+    dependsOn(encryptLuaxScripts)
+}
+
 dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.appcompat)

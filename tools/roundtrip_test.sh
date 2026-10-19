@@ -44,11 +44,14 @@ cat > "$TMP/loader.c" <<'EOF'
 #include "lualib.h"
 
 #define HDR 24
-static const uint8_t K[32] = {
-  0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
-  0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f };
+/* key 由 -DKEY_HEX 传入，取自 luajava.c 的 LUAX_KEY，避免两边不同步 */
+static uint8_t K[32];
+static void load_key(const char *hex) {
+    for (int i = 0; i < 32; i++) { unsigned v; sscanf(hex + i * 2, "%2x", &v); K[i] = (uint8_t)v; }
+}
 
 int main(int argc, char **argv) {
+    load_key(argv[2]);
     FILE *f = fopen(argv[1], "rb");
     if (!f) { perror("open"); return 1; }
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
@@ -76,8 +79,16 @@ int main(int argc, char **argv) {
     return 0;
 }
 EOF
+KEY_HEX=$(python3 - "$CPP/luajava.c" <<'PY2'
+import re, sys
+s = open(sys.argv[1]).read()
+m = re.search(r"LUAX_KEY\[32\] = \{([^}]*)\}", s, re.S)
+print("".join(x.strip().replace("0x", "") for x in m.group(1).split(",") if x.strip()))
+PY2
+)
+echo "  取自 luajava.c 的 key: ${KEY_HEX:0:8}… (${#KEY_HEX} 字符)"
 # shellcheck disable=SC2086
 cc -O2 -I "$CPP" -I "$CPP/lua" -o "$TMP/loader" "$TMP/loader.c" "$CPP/chacha20.c" $LUA_SRC -lm
-"$TMP/loader" "$TMP/hello.luax"
+"$TMP/loader" "$TMP/hello.luax" "$KEY_HEX"
 echo
 echo "结论：加密→解密→加载→执行 全链路一致"
