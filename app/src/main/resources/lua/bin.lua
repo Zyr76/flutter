@@ -314,6 +314,17 @@ local function binapk(luapath, apkpath)
         local lib = name:match("([^/]+%.so)$")
         if replace[name] then
         elseif lib and replace[lib] then
+            -- 编辑器自带的 .so（luajava/flutter/cjson…）必须随包打进产物，
+            -- 否则新包一启动就找不到 native 库直接闪退。
+            -- replace 的键来自 nativeLibraryDir.list()，只有文件名没有路径，所以要单独判断再拷贝。
+            local lib_entry = ZipEntry(name)
+            local lib_ok = pcall(function()
+                out.putNextEntry(lib_entry)
+            end)
+            if lib_ok then
+                seen_entries[name] = true
+                copy2(zis, out)
+            end
         elseif name:find("^assets/") then
         elseif name:find("^lua/") then
         elseif name:find("META%-INF") then
