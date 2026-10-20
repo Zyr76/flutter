@@ -25,6 +25,7 @@
 #include "lua.h"
 
 #include "lauxlib.h"
+#include "../luax.h"   /* LUAX 加密脚本 */
 #include "llimits.h"
 
 
@@ -811,6 +812,11 @@ LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
   int status, readstatus;
   int c;
   int fnameindex = lua_gettop(L) + 1;  /* index of filename on the stack */
+  if (filename != NULL) {
+    int luax_status = luax_loadfile(L, filename, mode);
+    if (luax_status >= 0)  /* 是 LUAX 密文，已解密加载（或已把错误压栈） */
+      return luax_status;
+  }
   if (filename == NULL) {
     lua_pushliteral(L, "=stdin");
     lf.f = stdin;

@@ -33,6 +33,7 @@ list(REMOVE_ITEM LUA_SOURCES
 add_library(luajava SHARED
     luajava.c
     chacha20.c
+    luax.c
     
     ${LUA_SOURCES}
 )

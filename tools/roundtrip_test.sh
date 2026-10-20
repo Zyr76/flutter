@@ -22,7 +22,7 @@ echo
 echo "== 2. 宿主编译 luac（与 so 同一份 lua 源码）=="
 LUA_SRC=$(ls "$CPP"/lua/*.c | grep -v -E '/lua\.c$|/luac\.c$')
 # shellcheck disable=SC2086
-cc -O2 -DLUA_USE_POSIX -o "$TMP/luac" "$CPP/lua/luac.c" $LUA_SRC -lm
+cc -O2 -DLUA_USE_POSIX -I "$CPP/lua" -o "$TMP/luac" "$CPP/lua/luac.c" "$CPP/luax.c" "$CPP/chacha20.c" $LUA_SRC -lm
 "$TMP/luac" -v
 
 printf 'local s = 0\nfor i = 1, 100 do s = s + i end\nprint("sum =", s)\n' > "$TMP/hello.lua"
@@ -79,16 +79,38 @@ int main(int argc, char **argv) {
     return 0;
 }
 EOF
-KEY_HEX=$(python3 - "$CPP/luajava.c" <<'PY2'
+KEY_HEX=$(python3 - "$CPP/luax.c" <<'PY2'
 import re, sys
 s = open(sys.argv[1]).read()
 m = re.search(r"LUAX_KEY\[32\] = \{([^}]*)\}", s, re.S)
 print("".join(x.strip().replace("0x", "") for x in m.group(1).split(",") if x.strip()))
 PY2
 )
-echo "  取自 luajava.c 的 key: ${KEY_HEX:0:8}… (${#KEY_HEX} 字符)"
+echo "  取自 luax.c 的 key: ${KEY_HEX:0:8}… (${#KEY_HEX} 字符)"
 # shellcheck disable=SC2086
-cc -O2 -I "$CPP" -I "$CPP/lua" -o "$TMP/loader" "$TMP/loader.c" "$CPP/chacha20.c" $LUA_SRC -lm
+cc -O2 -I "$CPP" -I "$CPP/lua" -o "$TMP/loader" "$TMP/loader.c" "$CPP/luax.c" "$CPP/chacha20.c" $LUA_SRC -lm
 "$TMP/loader" "$TMP/hello.luax" "$KEY_HEX"
 echo
-echo "结论：加密→解密→加载→执行 全链路一致"
+echo
+echo "== 5. require 路径（luaL_loadfilex 挂载点）=="
+cat > "$TMP/mod_src.lua" <<'EOF'
+local M = {}
+function M.hello() return "加密模块" end
+return M
+EOF
+cat > "$TMP/main.lua" <<'EOF'
+local m = require "mod"
+assert(m.hello() == "加密模块", "模块返回值不对")
+print("require 加密模块 OK")
+EOF
+cp "$TMP/mod_src.lua" "$TMP/mod.lua"
+python3 "$ROOT/tools/encrypt_luax.py" "$TMP/mod.lua" "$TMP/mod.lua" >/dev/null
+# shellcheck disable=SC2086
+cc -O2 -DLUA_USE_POSIX -I "$CPP" -I "$CPP/lua" -o "$TMP/lua" \
+   "$CPP/lua/lua.c" "$CPP/luax.c" "$CPP/chacha20.c" $LUA_SRC -lm
+(cd "$TMP" && ./lua main.lua)
+cp "$TMP/mod_src.lua" "$TMP/mod.lua"
+(cd "$TMP" && ./lua main.lua >/dev/null && echo "明文模块对照 OK")
+
+echo
+echo "结论：加密→解密→加载→执行 全链路一致（含 require 路径）"
