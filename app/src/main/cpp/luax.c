@@ -127,7 +127,7 @@ static int luax_random_nonce(uint8_t nonce[12]) {
     return got == 12;
 }
 
-uint8_t *luax_encrypt(const uint8_t *data, size_t n, size_t *outlen) {
+unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen) {
     uint8_t nonce[12];
     uint8_t *plain, *out;
     size_t total;

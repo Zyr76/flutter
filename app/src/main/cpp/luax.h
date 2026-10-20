@@ -7,7 +7,6 @@
 #define LUAJAVA_LUAX_H
 
 #include <stddef.h>
-#include <stdint.h>
 
 /* 只前置声明，避免把 lua.h 的包含顺序带进 lua 核心的编译单元 */
 typedef struct lua_State lua_State;
@@ -32,7 +31,7 @@ int luax_loadfile(lua_State *L, const char *filename, const char *mode);
 
 /* 加密任意内容（自动识别 \x1bLua 字节码头并置 flags）。
  * 成功返回 malloc 的缓冲，*outlen 为总长度；失败返回 NULL。 */
-uint8_t *luax_encrypt(const uint8_t *data, size_t n, size_t *outlen);
+unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen);
 
 #ifdef __cplusplus
 }
