@@ -170,3 +170,202 @@ unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen)
     *outlen = total;
     return out;
 }
+
+/* ===================== 密文容器 .so 支持 =====================
+ *
+ * 把一个 Lua 模块的密文放进独立的 .so 数据段，模块名 = 原文件名 base64
+ * （url-safe、去掉填充），文件名为 lib<模块名>.so。
+ *
+ * 容器里只有两个固定符号：
+ *     const unsigned char luax_blob[];      密文（LUAX 格式）
+ *     const unsigned long luax_blob_len;    长度
+ * 不依赖任何 Lua C 符号，所以容器 .so 只有几 KB，也无需链接 Lua。
+ *
+ * require "<模块名>" 由下面的 searcher 接管：按 package.cpath 找到 .so，
+ * dlopen 取数据段，解密后执行模块体并返回其结果。
+ */
+#include <dlfcn.h>
+
+#define LUAX_SO_BLOB_SYM "luax_blob"
+#define LUAX_SO_LEN_SYM  "luax_blob_len"
+
+static int luax_file_readable(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        return 0;
+    }
+    fclose(f);
+    return 1;
+}
+
+/* 只接管 [A-Za-z0-9_-] 组成的名字，普通模块名（含 . 或中文）不处理 */
+static int luax_is_container_name(const char *name) {
+    size_t i;
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; name[i] != '\0'; i++) {
+        char c = name[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+              || (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* 用 package.cpath 把模块名解析成 .so 路径；返回 malloc 的字符串或 NULL */
+static char *luax_resolve_so_path(lua_State *L, const char *name) {
+    char *result = NULL;
+    const char *cp;
+    size_t name_len = strlen(name);
+
+    lua_getglobal(L, "package");
+    lua_getfield(L, -1, "cpath");
+    cp = lua_tostring(L, -1);
+    while (cp != NULL && *cp != '\0' && result == NULL) {
+        const char *sep = strchr(cp, ';');
+        size_t seg = (sep != NULL) ? (size_t)(sep - cp) : strlen(cp);
+        const char *q = strchr(cp, '?');
+        if (q != NULL && (size_t)(q - cp) < seg) {
+            size_t pre = (size_t)(q - cp);
+            size_t suf = seg - pre - 1;
+            char *path = (char *)malloc(pre + name_len + suf + 1);
+            if (path != NULL) {
+                memcpy(path, cp, pre);
+                memcpy(path + pre, name, name_len);
+                memcpy(path + pre + name_len, q + 1, suf);
+                path[pre + name_len + suf] = '\0';
+                if (luax_file_readable(path)) {
+                    result = path;
+                } else {
+                    free(path);
+                }
+            }
+        }
+        cp = (sep != NULL) ? sep + 1 : NULL;
+    }
+    lua_pop(L, 2);
+    return result;
+}
+
+/* 打开容器并取出数据段；不是容器返回 NULL */
+static void *luax_open_container(const char *path, const unsigned char **blob,
+                                 size_t *len) {
+    void *h;
+    const void *b;
+    const void *l;
+
+    h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (h == NULL) {
+        return NULL;
+    }
+    b = dlsym(h, LUAX_SO_BLOB_SYM);
+    l = dlsym(h, LUAX_SO_LEN_SYM);
+    if (b == NULL || l == NULL) {
+        dlclose(h);
+        return NULL;
+    }
+    *blob = (const unsigned char *)b;
+    *len = (size_t)(*(const unsigned long *)l);
+    return h;
+}
+
+static int luax_run_blob(lua_State *L, const unsigned char *blob, size_t len,
+                         const char *name) {
+    char *chunkname = (char *)malloc(strlen(name) + 2);
+    int rc;
+    if (chunkname != NULL) {
+        chunkname[0] = '@';
+        memcpy(chunkname + 1, name, strlen(name) + 1);
+    }
+    rc = luax_decrypt_load(L, (const char *)blob, len,
+                           chunkname != NULL ? chunkname : name);
+    free(chunkname);
+    if (rc != LUA_OK) {
+        return lua_error(L);
+    }
+    lua_call(L, 0, 1);   /* 执行模块体，取其返回值 */
+    return 1;
+}
+
+/* 闭包 upvalue：1=路径 2=句柄 3=blob 4=长度 5=名字 */
+static int luax_container_loader(lua_State *L) {
+    const unsigned char *blob =
+        (const unsigned char *)lua_touserdata(L, lua_upvalueindex(3));
+    size_t len = (size_t)lua_tointeger(L, lua_upvalueindex(4));
+    const char *name = lua_tostring(L, lua_upvalueindex(5));
+    return luax_run_blob(L, blob, len, name);
+}
+
+static int luax_container_searcher(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    char *path;
+    void *h;
+    const unsigned char *blob = NULL;
+    size_t len = 0;
+
+    if (!luax_is_container_name(name)) {
+        lua_pushfstring(L, "'%s' 不是 LUAX 容器模块名", name);
+        return 1;
+    }
+    path = luax_resolve_so_path(L, name);
+    if (path == NULL) {
+        lua_pushfstring(L, "找不到 LUAX 容器模块 '%s'", name);
+        return 1;
+    }
+    h = luax_open_container(path, &blob, &len);
+    if (h == NULL || len < LUAX_HDR || !luax_is_encrypted((const char *)blob, len)) {
+        if (h != NULL) {
+            dlclose(h);
+        }
+        lua_pushfstring(L, "'%s' 不是 LUAX 容器", path);
+        free(path);
+        return 1;   /* 返回字符串，让后面的 searcher 继续找 */
+    }
+    lua_pushstring(L, path);
+    lua_pushlightuserdata(L, h);
+    lua_pushlightuserdata(L, (void *)blob);
+    lua_pushinteger(L, (lua_Integer)len);
+    lua_pushstring(L, name);
+    free(path);
+    lua_pushcclosure(L, luax_container_loader, 5);
+    return 1;
+}
+
+/* luax.loadso(path)：按 .so 路径直接加载，等价于 require 的容器分支 */
+static int luax_loadso(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    const unsigned char *blob = NULL;
+    size_t len = 0;
+    void *h = luax_open_container(path, &blob, &len);
+
+    if (h == NULL) {
+        return luaL_error(L, "不是 LUAX 容器: %s", path);
+    }
+    return luax_run_blob(L, blob, len, path);
+}
+
+static const luaL_Reg luax_lib[] = {
+    {"loadso", luax_loadso},
+    {NULL, NULL}
+};
+
+int luaopen_luax(lua_State *L) {
+    luaL_newlib(L, luax_lib);
+    /* 把 searcher 插到 package.searchers 第 3 位（Lua 的 C loader 之前） */
+    lua_getglobal(L, "package");
+    lua_getfield(L, -1, "searchers");
+    if (lua_istable(L, -1)) {
+        lua_Integer n = luaL_len(L, -1);
+        lua_Integer k;
+        for (k = n; k >= 3; k--) {
+            lua_geti(L, -1, k);
+            lua_seti(L, -2, k + 1);
+        }
+        lua_pushcfunction(L, luax_container_searcher);
+        lua_seti(L, -2, 3);
+    }
+    lua_pop(L, 2);
+    return 1;
+}

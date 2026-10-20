@@ -33,6 +33,10 @@ int luax_loadfile(lua_State *L, const char *filename, const char *mode);
  * 成功返回 malloc 的缓冲，*outlen 为总长度；失败返回 NULL。 */
 unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen);
 
+/* 注册 LUAX 库：提供 luax.loadso(path)，并把容器 searcher 插进 package.searchers。
+ * 由 luaL_openlibs 自动调用。 */
+int luaopen_luax(lua_State *L);
+
 #ifdef __cplusplus
 }
 #endif

@@ -122,3 +122,30 @@ target_link_libraries(luajava bson cjson canvas crypt md5 xml socket yyjson
     log
     dl
 )
+
+# ---- LUAX 加密容器模块 ----
+# app/src/main/luaxso/*.lua 中每个模块都被加密后放进独立的 .so 数据段，
+# .so 文件名为 lib<模块名>.so，模块名 = 原文件名 base64url（去填充）。
+# 运行时 require "<模块名>" 由 lua 侧的 LUAX searcher 接管：dlopen 取数据段、
+# 解密、执行模块体。容器本身不含任何 Lua 代码，只有 luax_blob/luax_blob_len 两个符号。
+set(LUAXSO_TOOL     ${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/luaxso.py)
+set(LUAXSO_SRC_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/luaxso)
+set(LUAXSO_GEN_DIR  ${CMAKE_CURRENT_BINARY_DIR}/luaxso_containers)
+file(MAKE_DIRECTORY ${LUAXSO_GEN_DIR})
+file(GLOB LUAXSO_MODULES ${LUAXSO_SRC_DIR}/*.lua)
+foreach(lua_file ${LUAXSO_MODULES})
+    execute_process(
+        COMMAND python3 ${LUAXSO_TOOL} gen ${lua_file} -o ${LUAXSO_GEN_DIR}
+        OUTPUT_VARIABLE luax_mod_name
+        ERROR_VARIABLE luax_mod_log
+        RESULT_VARIABLE luax_gen_rc
+    )
+    if(NOT luax_gen_rc EQUAL 0)
+        message(FATAL_ERROR "luaxso 生成失败: ${lua_file}\n${luax_mod_log}")
+    endif()
+    string(STRIP "${luax_mod_name}" luax_mod_name)
+    string(REPLACE "-" "_" luax_target "luaxso_${luax_mod_name}")
+    add_library(${luax_target} SHARED ${LUAXSO_GEN_DIR}/luax_blob_${luax_mod_name}.c)
+    set_target_properties(${luax_target} PROPERTIES OUTPUT_NAME "${luax_mod_name}")
+    message(STATUS "LUAX 容器: lib${luax_mod_name}.so <- ${lua_file}")
+endforeach()

@@ -60,16 +60,22 @@ def chacha20_xor(data, key, nonce, counter=1):
     return bytes(out)
 
 
-def encrypt_file(src, dst):
-    data = open(src, "rb").read()
-    is_bytecode = 1 if src.endswith(".luac") else 0
+def encrypt_bytes(data, is_bytecode=None):
+    """加密一段内容，返回完整密文（24 字节头 + 密文）。"""
+    if is_bytecode is None:
+        is_bytecode = 1 if data[:4] == b"\x1bLua" else 0
     nonce = os.urandom(12)
     key = bytes.fromhex(KEY_HEX)
     ct = chacha20_xor(data, key, nonce, 1)
     header = MAGIC + bytes([VERSION, is_bytecode, 0, 0]) + nonce + struct.pack("<I", len(data))
+    return header + ct
+
+
+def encrypt_file(src, dst):
+    data = open(src, "rb").read()
     with open(dst, "wb") as f:
-        f.write(header + ct)
-    return len(data), is_bytecode
+        f.write(encrypt_bytes(data))
+    return len(data), 1 if data[:4] == b"\x1bLua" else 0
 
 
 def main():
