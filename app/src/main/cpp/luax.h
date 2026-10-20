@@ -9,7 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "lua.h"
+/* 只前置声明，避免把 lua.h 的包含顺序带进 lua 核心的编译单元 */
+typedef struct lua_State lua_State;
 
 #ifdef __cplusplus
 extern "C" {
