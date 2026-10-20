@@ -29,31 +29,41 @@ list(REMOVE_ITEM LUA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/lua/luac.c"
 )
 
+# LUAX 加密脚本支持。lua/lauxlib.c 的 luaL_loadfilex 引用了 luax_loadfile，
+# 所以凡是编译 LUA_SOURCES 的目标都必须带上这两个文件，否则链接报
+# undefined symbol: luax_loadfile。每个 .so 各自持有一份实现（密钥也随之重复）。
+set(LUA_EXTRA_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/chacha20.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/luax.c
+)
+
 # 创建共享库
 add_library(luajava SHARED
     luajava.c
-    chacha20.c
-    luax.c
-    
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 add_library(bson SHARED
     bson/lua-bson.c
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 add_library(canvas SHARED
     canvas/canvas.c
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 add_library(cjson SHARED
     cjson/lua_cjson.c
     cjson/fpconv.c
     cjson/strbuf.c
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 add_library(crypt SHARED
     crypt/lcrypt.c
     crypt/lsha1.c
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 
@@ -62,6 +72,7 @@ add_library(crypt SHARED
 
 add_library(md5 SHARED
     md5/md5.c
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 
@@ -79,6 +90,7 @@ add_library(socket SHARED
     socket/select.c
     socket/usocket.c
 
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 
@@ -86,6 +98,7 @@ add_library(socket SHARED
 
 add_library(xml SHARED
     xml/xml.c
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 
@@ -98,6 +111,7 @@ add_library(yyjson SHARED
     yyjson/lua_yyjson.c
     yyjson/yyjson.c
 
+    ${LUA_EXTRA_SOURCES}
     ${LUA_SOURCES}
 )
 
