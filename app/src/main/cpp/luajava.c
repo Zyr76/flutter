@@ -45,19 +45,6 @@
 #include "luajava.h"
 #include "luax.h"
 
-#define LUAX_MAGIC        "LUAX"
-#define LUAX_HDR          24
-#define LUAX_VERSION      0x55
-#define LUAX_FLAG_BYTECODE 1
-
-/* 演示密钥：正式发布前务必替换，并按文档建议拆成「so 常量 + 运行时派生」两片 */
-static const uint8_t LUAX_KEY[32] = {
-        0x69,     0x79,     0x57,     0x7a,     0xd6,     0x04,     0x77,     0x57,
-        0x5e,     0xe3,     0x16,     0xe0,     0x0b,     0xbc,     0xcf,     0x00,
-        0x66,     0xd6,     0xda,     0x4a,     0xbf,     0x63,     0xec,     0x57,
-        0xc8,     0x85,     0x4c,     0xc1,     0x7c,     0xe4,     0xbb,     0x7b
-};
-JNIEXPORT jbyteArray JNICALL
 /* Call metamethod name */
 #define LUACALLMETAMETHODTAG "__call"
 #define LUATOSTRINGMETAMETHODTAG "__tostring"
