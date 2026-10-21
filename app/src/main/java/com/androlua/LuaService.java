@@ -776,12 +776,15 @@ public class LuaService extends Service implements LuaContext,LuaBroadcastReceiv
 		String fn = name;
 		if (i > 0)
 			fn = name.substring(0, i);
-		File f=new File(libDir + "/lib" + fn + ".so");
-		if (!f.exists()) {
-			f = new File(luaDir + "/lib" + fn + ".so");
-			if (!f.exists())
-				throw new LuaException("can not find lib " + name);
-			copyFile(luaDir + "/lib" + fn + ".so", libDir + "/lib" + fn + ".so");
+		String libPath = libDir + "/lib" + fn + ".so";
+		File dest = new File(libPath);
+		File src = new File(luaDir + "/lib" + fn + ".so");
+		if (src.exists()) {
+			if (LuaUtil.isFileOutdated(src, dest)
+					&& !LuaUtil.copyFileAtomic(src.getAbsolutePath(), libPath))
+				throw new LuaException("copy lib failed: " + name);
+		} else if (!dest.exists()) {
+			throw new LuaException("can not find lib " + name);
 		}
 		LuaObject require=L.getLuaObject("require");
 		return require.call(name);

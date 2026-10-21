@@ -159,6 +159,94 @@ public class LuaUtil {
         return true;
     }
 
+    /** 逐块读满（InputStream.read 可能只返回一部分）。 */
+    private static int readBlock(InputStream in, byte[] buf) throws IOException {
+        int off = 0;
+        while (off < buf.length) {
+            int n = in.read(buf, off, buf.length - off);
+            if (n < 0)
+                break;
+            off += n;
+        }
+        return off;
+    }
+
+    private static void closeQuietly(InputStream in) {
+        if (in != null) {
+            try {
+                in.close();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    /**
+     * 目标不存在、大小不同、或内容不同时返回 true。
+     * 用逐字节比较而不是 MD5：长度不同可立刻判定，内容不同时通常在前几块就能发现，
+     * 不用把两个文件都完整读一遍。
+     */
+    public static boolean isFileOutdated(File src, File dst) {
+        if (src == null || dst == null)
+            return true;
+        if (!dst.exists())
+            return true;
+        if (src.length() != dst.length())
+            return true;
+        InputStream a = null, b = null;
+        try {
+            a = new BufferedInputStream(new FileInputStream(src));
+            b = new BufferedInputStream(new FileInputStream(dst));
+            byte[] ba = new byte[8192];
+            byte[] bb = new byte[8192];
+            while (true) {
+                int na = readBlock(a, ba);
+                int nb = readBlock(b, bb);
+                if (na != nb)
+                    return true;
+                if (na <= 0)
+                    return false;
+                for (int i = 0; i < na; i++) {
+                    if (ba[i] != bb[i])
+                        return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.i("lua", "isFileOutdated: " + e.getMessage());
+            return true;
+        } finally {
+            closeQuietly(a);
+            closeQuietly(b);
+        }
+    }
+
+    /**
+     * 原子复制：先写同目录临时文件，再 rename 覆盖目标。
+     * 直接覆盖已被 dlopen 的 .so 会得到 ETXTBSY（Text file busy）；
+     * rename(2) 只替换目录项，已映射的旧 inode 继续有效，新进程拿到新文件。
+     */
+    public static boolean copyFileAtomic(String from, String to) {
+        File src = new File(from);
+        File dst = new File(to);
+        File parent = dst.getParentFile();
+        if (parent != null && !parent.exists())
+            parent.mkdirs();
+        File tmp = new File(to + "." + android.os.Process.myPid() + ".tmp");
+        try {
+            if (!copyFile(new FileInputStream(src), new FileOutputStream(tmp)))
+                throw new IOException("copy failed");
+            if (tmp.renameTo(dst))
+                return true;
+            // 少数文件系统不支持覆盖式 rename：先 unlink 旧文件再改名
+            if (dst.delete() && tmp.renameTo(dst))
+                return true;
+            throw new IOException("rename failed");
+        } catch (Exception e) {
+            Log.i("lua", "copyFileAtomic: " + e.getMessage());
+            tmp.delete();
+            return false;
+        }
+    }
+
     public static boolean copyDir(String from, String to) {
         return copyDir(new File(from), new File(to));
     }

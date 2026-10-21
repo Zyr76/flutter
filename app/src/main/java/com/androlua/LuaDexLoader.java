@@ -93,12 +93,15 @@ public class LuaDexLoader {
         // 这样 package.cpath 里的 <libDir>/lib?.so 也能直接命中。
         String libDir = mContext.getContext().getDir("lib", Context.MODE_PRIVATE).getAbsolutePath();
         String libPath = libDir + "/lib" + fn + ".so";
-        File f = new File(libPath);
-        if (!f.exists()) {
-            f = new File(luaDir + "/libs/lib" + fn + ".so");
-            if (!f.exists())
-                throw new LuaException("can not find lib " + name);
-            LuaUtil.copyFile(luaDir + "/libs/lib" + fn + ".so", libPath);
+        File dest = new File(libPath);
+        File src = new File(luaDir + "/libs/lib" + fn + ".so");
+        if (src.exists()) {
+            // 源文件变了（换版本/修 bug）就刷新，否则沿用已复制的那份
+            if (LuaUtil.isFileOutdated(src, dest)
+                    && !LuaUtil.copyFileAtomic(src.getAbsolutePath(), libPath))
+                throw new LuaException("copy lib failed: " + name);
+        } else if (!dest.exists()) {
+            throw new LuaException("can not find lib " + name);
         }
         libCache.put(fn, libPath);
     }
