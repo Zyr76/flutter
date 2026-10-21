@@ -308,19 +308,9 @@ local function binapk(luapath, apkpath)
 
     this.update("正在打包...");
     local seen_entries = {}
-    local max_dex = 0
     local entry = zis.getNextEntry();
     while entry do
         local name = entry.getName()
-        if name:match("^classes%d*%.dex$") then
-            local idx = tonumber(name:match("^classes(%d*)%.dex$"))
-            if idx == nil then
-                idx = 1          -- classes.dex
-            end
-            if idx > max_dex then
-                max_dex = idx
-            end
-        end
         local lib = name:match("([^/]+%.so)$")
         if replace[name] then
         elseif lib and replace[lib] then
@@ -418,68 +408,6 @@ local function binapk(luapath, apkpath)
         end
         entry = zis.getNextEntry()
     end
-    -- ===== 合并 .fxp 扩展包 =====
-    -- 约定：*.fxp 放在 <脚本目录>/libs/flutter/ 下。
-    -- 必须是子目录：LuaDexLoader.loadLibs 会把 libs/ 下所有非 .so 文件当 dex 加载，
-    -- 放根目录会导致加载失败并让脚本起不来。
-    local function merge_fxp(dirpath)
-        local d = File(dirpath)
-        if not d.exists() or not d.isDirectory() then
-            return
-        end
-        local fs = luajava.astable(d.listFiles())
-        for k = 1, #fs do
-            local p = fs[k]
-            if p.isFile() and p.getName():lower():match("%.fxp$") then
-                local ok, err = pcall(function()
-                    local zf = ZipFile(p)
-                    -- dex：依次改成下一个可用编号，ART 会按 classes.dex、classes2.dex… 顺序加载
-                    local dex_names = {}
-                    local es = zf.entries()
-                    while es.hasMoreElements() do
-                        local e = es.nextElement()
-                        local n = e.getName()
-                        if n:match("^classes%d*%.dex$") then
-                            table.insert(dex_names, n)
-                        end
-                    end
-                    table.sort(dex_names)
-                    for _, n in ipairs(dex_names) do
-                        max_dex = max_dex + 1
-                        local target
-                        if max_dex == 1 then
-                            target = "classes.dex"
-                        else
-                            target = string.format("classes%d.dex", max_dex)
-                        end
-                        if not seen_entries[target] then
-                            out.putNextEntry(ZipEntry(target))
-                            seen_entries[target] = true
-                            copy2(zf.getInputStream(zf.getEntry(n)), out)
-                        end
-                    end
-                    -- lib/ 与 assets/ 原样并入
-                    local es2 = zf.entries()
-                    while es2.hasMoreElements() do
-                        local e = es2.nextElement()
-                        local n = e.getName()
-                        if (not e.isDirectory()) and not seen_entries[n]
-                                and (n:find("^lib/") or n:find("^assets/")) then
-                            out.putNextEntry(ZipEntry(n))
-                            seen_entries[n] = true
-                            copy2(zf.getInputStream(e), out)
-                        end
-                    end
-                    zf.close()
-                end)
-                if not ok then
-                    table.insert(errbuffer, "fxp 合并失败 " .. p.getName() .. "：" .. tostring(err))
-                end
-            end
-        end
-    end
-    merge_fxp(luapath .. "libs/flutter")
-
     out.setComment(table.concat(md5s))
     --print(table.concat(md5s,"/n"))
     zis.close();
