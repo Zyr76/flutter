@@ -192,6 +192,10 @@ local function binapk(luapath, apkpath)
     replace["libluajava.so"] = false
 
     local function addDir(out, dir, f)
+        -- libs/pack 下的 so 不进 assets，改由 addPackLibs 写进 lib/<abi>/
+        if dir == "libs/pack/" then
+            return
+        end
         local entry = ZipEntry("assets/" .. dir)
         out.putNextEntry(entry)
         local ls = f.listFiles()
@@ -408,6 +412,33 @@ local function binapk(luapath, apkpath)
         end
         entry = zis.getNextEntry()
     end
+
+    -- ===== 把 <项目>/libs/pack/*.so 写进产物的 lib/arm64-v8a/ =====
+    -- 本工程 abiFilters 只有 arm64-v8a，这里固定写 64 位目录。
+    -- 宿主 manifest 的 extractNativeLibs=true，安装时系统会把这些 so 解压到
+    -- nativeLibraryDir，之后 System.loadLibrary 才能找到（Flutter 引擎只认这个目录）。
+    -- 与宿主已有的同名条目去重：宿主那份优先，不覆盖。
+    local function addPackLibs(out)
+        local d = File(luapath .. "libs/pack")
+        if not d.exists() or not d.isDirectory() then
+            return
+        end
+        local ls = luajava.astable(d.listFiles())
+        for k = 1, #ls do
+            local p = ls[k]
+            local name = p.getName()
+            if p.isFile() and name:lower():match("%.so$") then
+                local target = "lib/arm64-v8a/" .. name
+                if not seen_entries[target] then
+                    out.putNextEntry(ZipEntry(target))
+                    seen_entries[target] = true
+                    copy2(FileInputStream(p), out)
+                end
+            end
+        end
+    end
+    addPackLibs(out)
+
     out.setComment(table.concat(md5s))
     --print(table.concat(md5s,"/n"))
     zis.close();

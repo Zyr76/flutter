@@ -38,6 +38,11 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // Flutter 引擎的 so 不进宿主（压缩后约 8.5MB）。
+            // 需要 Flutter 的项目把这两个 so 放到 <项目>/libs/pack/，
+            // 由 bin.lua 在打包时写进产物的 lib/arm64-v8a/。
+            // 注意：宿主不再自带 Flutter 引擎，编辑器内直接跑 Flutter 示例会失败。
+            excludes += listOf("lib/arm64-v8a/libflutter.so", "lib/arm64-v8a/libapp.so")
         }
     }
 
