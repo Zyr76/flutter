@@ -88,7 +88,10 @@ public class LuaDexLoader {
             fn = name.substring(0, i);
         if (fn.startsWith("lib"))
             fn = fn.substring(3);
-        String libDir = mContext.getContext().getDir(fn, Context.MODE_PRIVATE).getAbsolutePath();
+        // 统一复制到 app_lib（与 LuaActivity/LuaService 的 loadLib 一致），
+        // 不再按库名各建一个 app_<name> 目录。
+        // 这样 package.cpath 里的 <libDir>/lib?.so 也能直接命中。
+        String libDir = mContext.getContext().getDir("lib", Context.MODE_PRIVATE).getAbsolutePath();
         String libPath = libDir + "/lib" + fn + ".so";
         File f = new File(libPath);
         if (!f.exists()) {
@@ -96,7 +99,6 @@ public class LuaDexLoader {
             if (!f.exists())
                 throw new LuaException("can not find lib " + name);
             LuaUtil.copyFile(luaDir + "/libs/lib" + fn + ".so", libPath);
-
         }
         libCache.put(fn, libPath);
     }
