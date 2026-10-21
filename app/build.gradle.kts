@@ -46,10 +46,24 @@ android {
         }
     }
 
-    // 便于侧载：release 用 debug keystore 签名（正式上架请换成自己的正式签名）
+    // 编辑器 APK 的固定签名。
+    // 不用 debug keystore：CI 的 runner 每次都是全新环境，AGP/keytool 会重新生成
+    // 一份 debug key，导致每个构建的签名都不同、无法覆盖安装。
+    // 这里用仓库内的 keystore/release.p12，本地与 CI 签名一致。
+    // 注意：私钥随仓库公开，任何人都能签出同样身份的包，只适合开发/内部分发。
+    signingConfigs {
+        create("release") {
+            storeFile = file("keystore/release.p12")
+            storePassword = "androlua-release"
+            keyAlias = "androlua"
+            keyPassword = "androlua-release"
+            storeType = "PKCS12"
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
         }
     }

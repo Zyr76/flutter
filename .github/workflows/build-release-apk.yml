@@ -43,16 +43,8 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" "$CM"
           "$CM/bin/cmake" --version
 
-      - name: Ensure debug keystore
-        run: |
-          KS="$HOME/.android/debug.keystore"
-          if [ ! -f "$KS" ]; then
-            mkdir -p "$HOME/.android"
-            keytool -genkeypair -v -keystore "$KS" -storepass android -alias androiddebugkey \
-              -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-
+      # release 使用仓库内固定的 app/keystore/release.p12 签名，
+      # 不再需要每次生成 debug keystore（那会导致每次构建签名不同、无法覆盖安装）。
       - name: Flutter pub get
         working-directory: flutter_bridge
         run: flutter pub get
