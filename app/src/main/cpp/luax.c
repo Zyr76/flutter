@@ -54,14 +54,14 @@ int luax_decrypt_load(lua_State *L, const char *s, size_t n,
     if (chacha20poly1305_decrypt(plain, p + LUAX_HDR, plain_len, LUAX_KEY,
                                  p + 8, p, LUAX_HDR,
                                  p + LUAX_HDR + plain_len) != 0) {
-        memset(plain, 0, plain_len);
+        chacha20_memzero(plain, plain_len);
         free(plain);
         lua_pushliteral(L, "LUAX: 密文校验失败（文件被篡改或密钥不匹配）");
         return LUA_ERRSYNTAX;
     }
     rc = luaL_loadbufferx(L, (const char *)plain, plain_len, chunkname,
                           mode ? "b" : "t");
-    memset(plain, 0, plain_len);
+    chacha20_memzero(plain, plain_len);
     free(plain);
     return rc;
 }

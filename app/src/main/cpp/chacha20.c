@@ -16,7 +16,7 @@
     c += d; b ^= c; b = ROTL32(b, 7);  \
 } while (0)
 
-static void secure_zero(void *p, size_t n) {
+void chacha20_memzero(void *p, size_t n) {
     volatile uint8_t *v = (volatile uint8_t *)p;
     while (n--) {
         *v++ = 0;
@@ -71,12 +71,13 @@ static void chacha20_block(uint8_t ks[64], const uint8_t key[32],
     for (i = 0; i < 16; i++) {
         store32le(ks + i * 4, x[i] + st[i]);
     }
-    secure_zero(st, sizeof(st));
-    secure_zero(x, sizeof(x));
+    chacha20_memzero(st, sizeof(st));
+    chacha20_memzero(x, sizeof(x));
 }
 
-void chacha20_xor(uint8_t *data, size_t len, const uint8_t key[32],
-                  const uint8_t nonce[12], uint32_t counter) {
+/* 内部实现：AEAD 的流加密部分与自测使用，不对外暴露 */
+static void chacha20_xor(uint8_t *data, size_t len, const uint8_t key[32],
+                         const uint8_t nonce[12], uint32_t counter) {
     uint8_t ks[64];
     size_t off = 0;
 
@@ -89,7 +90,7 @@ void chacha20_xor(uint8_t *data, size_t len, const uint8_t key[32],
         }
         off += n;
     }
-    secure_zero(ks, sizeof(ks));
+    chacha20_memzero(ks, sizeof(ks));
 }
 
 /* ---------------------------- Poly1305 ----------------------------
@@ -263,7 +264,7 @@ static void poly1305_finish(poly1305_state *st, uint8_t mac[16]) {
     store32le(mac + 8, h2);
     store32le(mac + 12, h3);
 
-    secure_zero(st, sizeof(*st));
+    chacha20_memzero(st, sizeof(*st));
 }
 
 /* ------------------------- ChaCha20-Poly1305 ------------------------- */
@@ -300,7 +301,7 @@ void chacha20poly1305_encrypt(uint8_t *out, const uint8_t *in, size_t len,
     poly1305_update(&st, lens, 16);
     poly1305_finish(&st, tag);
 
-    secure_zero(polykey, sizeof(polykey));
+    chacha20_memzero(polykey, sizeof(polykey));
 }
 
 int chacha20poly1305_decrypt(uint8_t *out, const uint8_t *in, size_t len,
@@ -328,14 +329,16 @@ int chacha20poly1305_decrypt(uint8_t *out, const uint8_t *in, size_t len,
     for (i = 0; i < 16; i++) {
         diff |= (uint8_t)(expected[i] ^ tag[i]);
     }
-    secure_zero(polykey, sizeof(polykey));
-    secure_zero(expected, sizeof(expected));
+    chacha20_memzero(polykey, sizeof(polykey));
+    chacha20_memzero(expected, sizeof(expected));
 
     if (diff != 0) {
         return -1;
     }
     if (len > 0) {
-        memcpy(out, in, len);
+        if (out != in) {
+            memcpy(out, in, len);
+        }
         chacha20_xor(out, len, key, nonce, 1);
     }
     return 0;
