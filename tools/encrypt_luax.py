@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """encrypt_luax.py —— 把 .lua / .luac 加密成 LUAX v2 密文
 
-格式（24 字节头 + 密文 + 16 字节标签，全部小端）：
+外层是 ASCII 文本（便于文本通道传输）：
+
+    LUAXB64\n
+    <base64(内层二进制)，每行 76 字符>
+
+内层二进制（24 字节头 + 密文 + 16 字节标签，全部小端）：
 
     offset 0..3   magic "LUAX"
     offset 4      version = 0x56（v2：ChaCha20-Poly1305）
@@ -21,6 +26,7 @@
 
 与 chacha20.c 的一致性由 tools/roundtrip_test.sh 保证。
 """
+import base64
 import hmac
 import os
 import struct
@@ -51,6 +57,7 @@ def key_bytes():
 VERSION = 0x56
 HEADER_SIZE = 24
 TAG_SIZE = 16
+B64_MAGIC = b"LUAXB64"
 
 _P = (1 << 130) - 5
 _R_MASK = 0x0FFFFFFC0FFFFFFC0FFFFFFC0FFFFFFF
@@ -123,6 +130,22 @@ def aead_decrypt(key32, nonce, aad, ct, tag):
     return chacha20_xor(ct, key32, nonce, 1)
 
 
+def b64_wrap(blob):
+    """内层二进制 → 外层 ASCII 文本。"""
+    enc = base64.b64encode(blob).decode("ascii")
+    lines = [enc[i:i + 76] for i in range(0, len(enc), 76)]
+    return B64_MAGIC + b"\n" + ("\n".join(lines) + "\n").encode("ascii")
+
+
+def b64_unwrap(data):
+    """外层 ASCII 文本 → 内层二进制。"""
+    if not data.startswith(B64_MAGIC):
+        raise ValueError("缺少 LUAXB64 头")
+    body = data[len(B64_MAGIC):]
+    body = b"".join(body.split())          # 去掉换行与空白
+    return base64.b64decode(body)
+
+
 def encrypt_bytes(data, key=None):
     """加密一段内容，返回完整 v2 密文。"""
     is_bytecode = 1 if data[:4] == b"\x1bLua" else 0
@@ -131,11 +154,12 @@ def encrypt_bytes(data, key=None):
         key = key_bytes()
     header = MAGIC + bytes([VERSION, is_bytecode, 0, 0]) + nonce + struct.pack("<I", len(data))
     ct, tag = aead_encrypt(key, nonce, header, data)
-    return header + ct + tag
+    return b64_wrap(header + ct + tag)
 
 
 def decrypt_bytes(blob, key=None):
     """解密并校验，返回 (明文, is_bytecode)。仅用于测试与排查。"""
+    blob = b64_unwrap(blob)
     if len(blob) < HEADER_SIZE or blob[:4] != MAGIC:
         raise ValueError("不是 LUAX 密文")
     if key is None:

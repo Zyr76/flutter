@@ -15,7 +15,9 @@ typedef struct lua_State lua_State;
 extern "C" {
 #endif
 
-#define LUAX_MAGIC_STR    "LUAX"
+#define LUAX_MAGIC_STR    "LUAX"        /* 内层二进制头 */
+#define LUAX_B64_MAGIC    "LUAXB64"     /* 外层 ASCII 头，其后是 base64 正文 */
+#define LUAX_B64_MAGIC_LEN 7
 #define LUAX_HDR          24          /* magic(4) ver(1) flags(1) rsv(2) nonce(12) len(4) */
 #define LUAX_TAG_LEN      16          /* Poly1305 认证标签，附在密文之后 */
 #define LUAX_VERSION      0x56        /* ChaCha20-Poly1305，头部 24 字节作为 AAD */

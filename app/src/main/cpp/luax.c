@@ -53,19 +53,113 @@ static const uint8_t *luax_key(void) {
     return g_key;
 }
 
-int luax_is_encrypted(const char *s, size_t n) {
-    return n >= LUAX_HDR && memcmp(s, LUAX_MAGIC_STR, 4) == 0;
+/* ===================== 外层 base64 =====================
+ * 密文以 ASCII 承载，便于文本通道传输、也能被 Java String 安全传递：
+ *     LUAXB64\n<base64(头+密文+标签)，每行 76 字符>
+ * AEAD 校验发生在 base64 解码之后，不受外层编码影响。
+ */
+static const char B64_CHARS[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static int luax_b64_val(int c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
 }
 
-int luax_decrypt_load(lua_State *L, const char *s, size_t n,
-                      const char *chunkname) {
+/* 编码：返回 malloc 的字符串（末尾有 \0），*outlen 不含 \0 */
+static char *luax_b64_encode(const uint8_t *in, size_t n, size_t *outlen) {
+    size_t cap = 4 * ((n + 2) / 3);
+    size_t total = LUAX_B64_MAGIC_LEN + 2 + cap + cap / 76 + 2;
+    char *out = (char *)malloc(total);
+    size_t o = 0, i, col = 0;
+
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, LUAX_B64_MAGIC, LUAX_B64_MAGIC_LEN);
+    o = LUAX_B64_MAGIC_LEN;
+    out[o++] = '\n';
+    for (i = 0; i < n; i += 3) {
+        uint32_t v = (uint32_t)in[i] << 16;
+        size_t rem = n - i;
+        if (rem > 1) {
+            v |= (uint32_t)in[i + 1] << 8;
+        }
+        if (rem > 2) {
+            v |= (uint32_t)in[i + 2];
+        }
+        out[o++] = B64_CHARS[(v >> 18) & 0x3F];
+        out[o++] = B64_CHARS[(v >> 12) & 0x3F];
+        out[o++] = (rem > 1) ? B64_CHARS[(v >> 6) & 0x3F] : '=';
+        out[o++] = (rem > 2) ? B64_CHARS[v & 0x3F] : '=';
+        col += 4;
+        if (col >= 76) {
+            out[o++] = '\n';
+            col = 0;
+        }
+    }
+    if (col != 0) {
+        out[o++] = '\n';
+    }
+    out[o] = '\0';
+    *outlen = o;
+    return out;
+}
+
+/* 解码：忽略空白，遇到 '=' 结束。失败返回 NULL */
+static uint8_t *luax_b64_decode(const char *s, size_t n, size_t *outlen) {
+    uint8_t *out = (uint8_t *)malloc(n / 4 * 3 + 4);
+    uint32_t acc = 0;
+    size_t o = 0, i;
+    int bits = 0;
+
+    if (out == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < n; i++) {
+        int c = (unsigned char)s[i];
+        int v;
+        if (c == '\r' || c == '\n' || c == ' ' || c == '\t') {
+            continue;
+        }
+        if (c == '=') {
+            break;
+        }
+        v = luax_b64_val(c);
+        if (v < 0) {
+            free(out);
+            return NULL;
+        }
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[o++] = (uint8_t)((acc >> bits) & 0xFF);
+        }
+    }
+    *outlen = o;
+    return out;
+}
+
+int luax_is_encrypted(const char *s, size_t n) {
+    return n > LUAX_B64_MAGIC_LEN
+        && memcmp(s, LUAX_B64_MAGIC, LUAX_B64_MAGIC_LEN) == 0;
+}
+
+/* 解析内层二进制（头 + 密文 + 标签） */
+static int luax_load_blob(lua_State *L, const char *s, size_t n,
+                          const char *chunkname) {
     const uint8_t *p = (const uint8_t *)s;
     uint32_t plain_len;
     uint8_t *plain;
     int mode, rc;
 
-    if (!luax_is_encrypted(s, n)) {
-        lua_pushliteral(L, "LUAX: 头部校验失败");
+    if (n < LUAX_HDR || memcmp(s, LUAX_MAGIC_STR, 4) != 0) {
+        lua_pushliteral(L, "LUAX: 内层头部校验失败");
         return LUA_ERRSYNTAX;
     }
     if (p[4] != LUAX_VERSION) {
@@ -104,6 +198,27 @@ int luax_decrypt_load(lua_State *L, const char *s, size_t n,
     return rc;
 }
 
+int luax_decrypt_load(lua_State *L, const char *s, size_t n,
+                      const char *chunkname) {
+    uint8_t *blob;
+    size_t dlen = 0;
+    int rc;
+
+    if (!luax_is_encrypted(s, n)) {
+        lua_pushliteral(L, "LUAX: 不是 LUAX 密文（缺少 LUAXB64 头）");
+        return LUA_ERRSYNTAX;
+    }
+    blob = luax_b64_decode(s + LUAX_B64_MAGIC_LEN, n - LUAX_B64_MAGIC_LEN, &dlen);
+    if (blob == NULL) {
+        lua_pushliteral(L, "LUAX: base64 解码失败");
+        return LUA_ERRSYNTAX;
+    }
+    rc = luax_load_blob(L, (const char *)blob, dlen, chunkname);
+    chacha20_memzero(blob, dlen);
+    free(blob);
+    return rc;
+}
+
 int luax_loadfile(lua_State *L, const char *filename, const char *mode) {
     FILE *f;
     uint8_t head[LUAX_HDR];
@@ -120,7 +235,8 @@ int luax_loadfile(lua_State *L, const char *filename, const char *mode) {
         return -1;                 /* 交给原有流程报 open 错误 */
     }
     got = fread(head, 1, sizeof(head), f);
-    if (got != sizeof(head) || !luax_is_encrypted((const char *)head, got)) {
+    if (got < LUAX_B64_MAGIC_LEN + 1
+            || !luax_is_encrypted((const char *)head, got)) {
         fclose(f);
         return -1;
     }
@@ -210,6 +326,16 @@ unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen)
     chacha20poly1305_encrypt(out + LUAX_HDR, data, n, luax_key(), nonce,
                              out, LUAX_HDR, out + LUAX_HDR + n);
 
-    *outlen = total;
-    return out;
+    /* 外层套 base64：产物是纯 ASCII 文本 */
+    {
+        size_t txtlen = 0;
+        char *txt = luax_b64_encode(out, total, &txtlen);
+        chacha20_memzero(out, total);
+        free(out);
+        if (txt == NULL) {
+            return NULL;
+        }
+        *outlen = txtlen;
+        return (unsigned char *)txt;
+    }
 }

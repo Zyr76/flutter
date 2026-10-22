@@ -36,12 +36,17 @@ echo
 echo "== 3. Python 加密（源码文本 + 字节码）=="
 python3 "$ROOT/tools/encrypt_luax.py" "$TMP/hello.lua" "$TMP/text.luax"
 python3 "$ROOT/tools/encrypt_luax.py" "$TMP/hello.luac" "$TMP/bin.luax"
-python3 - "$TMP/text.luax" "$TMP/bin.luax" <<'EOF'
+python3 - "$TMP/text.luax" "$TMP/bin.luax" "$ROOT/tools" <<'EOF'
 import sys
-for p in sys.argv[1:]:
-    b = open(p, "rb").read()
-    print("  %-12s %d 字节  magic=%s ver=0x%02x flags=%d" %
-          (p.split("/")[-1], len(b), b[:4].decode(), b[4], b[5]))
+sys.path.insert(0, sys.argv[3])
+import encrypt_luax as E
+for p in sys.argv[1:3]:
+    txt = open(p, "rb").read()
+    blob = E.b64_unwrap(txt)
+    ascii_only = all(32 <= c < 127 or c in (10, 13) for c in txt)
+    print("  %-12s 外层 %d 字节(纯ASCII=%s)  内层 %d 字节  magic=%s ver=0x%02x flags=%d" %
+          (p.split("/")[-1], len(txt), ascii_only, len(blob),
+           blob[:4].decode(), blob[4], blob[5]))
 EOF
 
 echo
@@ -91,25 +96,36 @@ echo "  --- 字节码密文 ---"
 
 echo
 echo "== 5. 篡改检测 =="
-python3 - "$TMP/bin.luax" "$TMP" <<'EOF'
+python3 - "$TMP/bin.luax" "$TMP" "$ROOT/tools" <<'EOF'
 import sys
-blob = bytearray(open(sys.argv[1], "rb").read())
+sys.path.insert(0, sys.argv[3])
+import encrypt_luax as E
+txt = open(sys.argv[1], "rb").read()
+blob = bytearray(E.b64_unwrap(txt))
 out = sys.argv[2]
+
+def dump(name, raw):
+    open(out + "/" + name + ".luax", "wb").write(E.b64_wrap(bytes(raw)))
+
 # 改密文最后一字节（属于密文区）
 a = bytearray(blob); a[-17] ^= 0x01
-open(out + "/tamper_ct.luax", "wb").write(a)
-# 改头部 flags（把文本/字节码标志翻转）—— 头部是 AAD，必须被校验
+dump("tamper_ct", a)
+# 改头部 flags —— 头部是 AAD，必须被校验
 b = bytearray(blob); b[5] ^= 0x01
-open(out + "/tamper_flags.luax", "wb").write(b)
+dump("tamper_flags", b)
 # 改 nonce
 c = bytearray(blob); c[8] ^= 0xff
-open(out + "/tamper_nonce.luax", "wb").write(c)
+dump("tamper_nonce", c)
 # 改版本号
-d = bytearray(blob); d[4] = 0x57   # 不支持的版本号
-open(out + "/tamper_ver.luax", "wb").write(d)
-print("  已生成 4 个篡改样本")
+d = bytearray(blob); d[4] = 0x57
+dump("tamper_ver", d)
+# 破坏 base64 正文本身（非法字符）
+e = bytearray(txt)
+e[60] = ord('!') if e[60] != ord('!') else ord('?')
+open(out + "/tamper_b64.luax", "wb").write(bytes(e))
+print("  已生成 5 个篡改样本（含 1 个外层 base64 破坏）")
 EOF
-for t in tamper_ct tamper_flags tamper_nonce tamper_ver; do
+for t in tamper_ct tamper_flags tamper_nonce tamper_ver tamper_b64; do
   if "$TMP/loader" "$TMP/$t.luax" > "$TMP/out.txt" 2>&1; then
     echo "  ✘ $t 未被拒绝（应当失败）"
     exit 1
@@ -149,11 +165,13 @@ python3 - "$TMP/c_enc.luax" "$TMP/hello.luac" "$ROOT/tools" <<'EOF'
 import sys
 sys.path.insert(0, sys.argv[3])
 import encrypt_luax as E
-blob = open(sys.argv[1], "rb").read()
-plain, is_bc = E.decrypt_bytes(blob)
+raw = open(sys.argv[1], "rb").read()
+blob = E.b64_unwrap(raw)
+plain, is_bc = E.decrypt_bytes(raw)
 orig = open(sys.argv[2], "rb").read()
-print("  C 加密 → Python 解密: %s（ver=0x%02x flags=%d）" %
-      ("一致 ✔" if plain == orig else "不一致 ✘", blob[4], is_bc))
+print("  C 加密 → Python 解密: %s（外层纯ASCII=%s 内层 ver=0x%02x flags=%d）" %
+      ("一致 ✔" if plain == orig else "不一致 ✘",
+       all(32 <= c < 127 or c in (10, 13) for c in raw), blob[4], is_bc))
 assert plain == orig
 EOF
 "$TMP/loader" "$TMP/c_enc.luax" > /dev/null && echo "  C 加密 → C 加载: ✔"

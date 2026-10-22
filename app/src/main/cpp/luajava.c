@@ -3601,13 +3601,8 @@ Java_com_luajava_LuaState__1LloadString(JNIEnv *env, jobject jobj, jlong cptr,
     int ret;
 
     if (luax_is_encrypted(fn, strlen(fn))) {
-        /* Java String 只能可靠承载文本，加密字节码请走 LloadFile / LloadBuffer */
-        if (((const uint8_t *)fn)[5] & LUAX_FLAG_BYTECODE) {
-            lua_pushliteral(L, "LUAX: LloadString 不支持加密字节码，请用 LloadFile");
-            ret = LUA_ERRSYNTAX;
-        } else {
-            ret = luax_decrypt_load(L, fn, strlen(fn), "=(loadstring)");
-        }
+        /* 密文外层是 ASCII 文本，Java String 可安全承载，源码与字节码都支持 */
+        ret = luax_decrypt_load(L, fn, strlen(fn), "=(loadstring)");
     } else {
         ret = luaL_loadstring(L, fn);
     }
