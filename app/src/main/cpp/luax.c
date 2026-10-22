@@ -7,13 +7,51 @@
 #include "chacha20.h"
 #include "lauxlib.h"
 
-/* 演示密钥：正式发布前务必替换，并按文档建议拆成「so 常量 + 运行时派生」两片 */
-static const uint8_t LUAX_KEY[32] = {
-    0x69, 0x79, 0x57, 0x7a, 0xd6, 0x04, 0x77, 0x57,
-    0x5e, 0xe3, 0x16, 0xe0, 0x0b, 0xbc, 0xcf, 0x00,
-    0x66, 0xd6, 0xda, 0x4a, 0xbf, 0x63, 0xec, 0x57,
-    0xc8, 0x85, 0x4c, 0xc1, 0x7c, 0xe4, 0xbb, 0x7b
+/* 密钥分片：32 字节密钥拆成两半，两半都不以明文存储。
+ * K_A / K_B 分别是「前半 ^ M1」「后半 ^ M2」的结果，
+ * 掩码在运行期由与密钥无关的常量按固定规则算出，因此：
+ *   - 直接 dump .rodata 看不到密钥；
+ *   - 必须把这两段代码一起逆向才能还原。
+ * 注意：这提高的是「取密钥的门槛」，不是数学意义上的保密——密钥最终仍以此进程内
+ * 的形式存在，能读进程内存的攻击者依然可以拿到。 */
+static const uint8_t K_A[16] = {
+    0xe0, 0x81, 0xc8, 0x8c, 0xa3, 0x90, 0xcc, 0x85,
+    0x0f, 0x53, 0xc1, 0xce, 0x36, 0xd0, 0x3c, 0x0a,
 };
+static const uint8_t K_B[16] = {
+    0x85, 0x43, 0x4a, 0xf0, 0x00, 0x32, 0xb8, 0x29,
+    0xb3, 0x98, 0x54, 0xf3, 0x4b, 0x3d, 0x67, 0x8d,
+};
+
+static uint8_t g_key[32];
+static int g_key_ready = 0;
+
+static void luax_build_key(void) {
+    int i;
+    if (g_key_ready) {
+        return;
+    }
+    for (i = 0; i < 16; i++) {
+        uint8_t m1 = (uint8_t)(((0x37 * (i + 1) + 0x5A) & 0xFF)
+                               ^ ((0x18 << (i & 3)) & 0xFF));
+        uint8_t m2 = (uint8_t)(((0x9E + (i + 1) * 17) & 0xFF)
+                               ^ (uint8_t)LUAX_MAGIC_STR[i & 3]);
+        g_key[i] = (uint8_t)(K_A[i] ^ m1);
+        g_key[16 + i] = (uint8_t)(K_B[i] ^ m2);
+    }
+    g_key_ready = 1;
+}
+
+/* 库加载时组装一次；并发首次调用写的值相同，属良性竞争 */
+__attribute__((constructor))
+static void luax_key_ctor(void) {
+    luax_build_key();
+}
+
+static const uint8_t *luax_key(void) {
+    luax_build_key();
+    return g_key;
+}
 
 int luax_is_encrypted(const char *s, size_t n) {
     return n >= LUAX_HDR && memcmp(s, LUAX_MAGIC_STR, 4) == 0;
@@ -51,7 +89,7 @@ int luax_decrypt_load(lua_State *L, const char *s, size_t n,
         lua_pushliteral(L, "LUAX: 解密缓冲分配失败");
         return LUA_ERRMEM;
     }
-    if (chacha20poly1305_decrypt(plain, p + LUAX_HDR, plain_len, LUAX_KEY,
+    if (chacha20poly1305_decrypt(plain, p + LUAX_HDR, plain_len, luax_key(),
                                  p + 8, p, LUAX_HDR,
                                  p + LUAX_HDR + plain_len) != 0) {
         chacha20_memzero(plain, plain_len);
@@ -169,7 +207,7 @@ unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen)
     out[23] = (uint8_t)((uint32_t)n >> 24);
 
     /* 头部 24 字节作为 AAD；密文写在其后，标签再跟在密文后 */
-    chacha20poly1305_encrypt(out + LUAX_HDR, data, n, LUAX_KEY, nonce,
+    chacha20poly1305_encrypt(out + LUAX_HDR, data, n, luax_key(), nonce,
                              out, LUAX_HDR, out + LUAX_HDR + n);
 
     *outlen = total;

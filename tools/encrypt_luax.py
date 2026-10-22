@@ -13,7 +13,7 @@
     末尾 16 字节   Poly1305 认证标签
 
 头部 24 字节整体作为 AAD 参与认证，所以 magic/version/flags/nonce/长度
-任何一项被修改都会导致校验失败（这是 v1 缺少的）。
+任何一项被修改都会导致校验失败。（纯流加密可被任意篡改，所以这里用 AEAD。）
 
 用法：
     python3 encrypt_luax.py input.lua  output.luax
@@ -26,10 +26,28 @@ import os
 import struct
 import sys
 
-# 必须与 luajava.c / luax.c 里的 LUAX_KEY 完全一致
-KEY_HEX = "6979577ad60477575ee316e00bbccf0066d6da4abf63ec57c8854cc17ce4bb7b"
-
 MAGIC = b"LUAX"
+
+# 密钥分片：与 luax.c 完全相同的存储方式——两半都以掩码混淆保存，
+# 运行期用固定规则算出掩码再异或还原。这里不保存 32 字节明文密钥。
+_K_A = bytes([0xe0, 0x81, 0xc8, 0x8c, 0xa3, 0x90, 0xcc, 0x85,
+              0x0f, 0x53, 0xc1, 0xce, 0x36, 0xd0, 0x3c, 0x0a])
+_K_B = bytes([0x85, 0x43, 0x4a, 0xf0, 0x00, 0x32, 0xb8, 0x29,
+              0xb3, 0x98, 0x54, 0xf3, 0x4b, 0x3d, 0x67, 0x8d])
+
+
+def _mask1(i):
+    return (((0x37 * (i + 1) + 0x5A) & 0xFF) ^ ((0x18 << (i & 3)) & 0xFF)) & 0xFF
+
+
+def _mask2(i):
+    return (((0x9E + (i + 1) * 17) & 0xFF) ^ MAGIC[i & 3]) & 0xFF
+
+
+def key_bytes():
+    """组装 32 字节密钥（与 luax.c 的 luax_build_key 等价）。"""
+    return (bytes(_K_A[i] ^ _mask1(i) for i in range(16))
+            + bytes(_K_B[i] ^ _mask2(i) for i in range(16)))
 VERSION = 0x56
 HEADER_SIZE = 24
 TAG_SIZE = 16
@@ -105,21 +123,23 @@ def aead_decrypt(key32, nonce, aad, ct, tag):
     return chacha20_xor(ct, key32, nonce, 1)
 
 
-def encrypt_bytes(data, key_hex=KEY_HEX):
+def encrypt_bytes(data, key=None):
     """加密一段内容，返回完整 v2 密文。"""
     is_bytecode = 1 if data[:4] == b"\x1bLua" else 0
     nonce = os.urandom(12)
-    key = bytes.fromhex(key_hex)
+    if key is None:
+        key = key_bytes()
     header = MAGIC + bytes([VERSION, is_bytecode, 0, 0]) + nonce + struct.pack("<I", len(data))
     ct, tag = aead_encrypt(key, nonce, header, data)
     return header + ct + tag
 
 
-def decrypt_bytes(blob, key_hex=KEY_HEX):
+def decrypt_bytes(blob, key=None):
     """解密并校验，返回 (明文, is_bytecode)。仅用于测试与排查。"""
     if len(blob) < HEADER_SIZE or blob[:4] != MAGIC:
         raise ValueError("不是 LUAX 密文")
-    key = bytes.fromhex(key_hex)
+    if key is None:
+        key = key_bytes()
     ver = blob[4]
     nonce = blob[8:20]
     plen = struct.unpack("<I", blob[20:24])[0]

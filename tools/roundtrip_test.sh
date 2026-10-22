@@ -173,5 +173,21 @@ cp "$TMP/mod/mod_src.lua" "$TMP/mod/mod.lua"
 (cd "$TMP/mod" && ../lua main.lua > /dev/null && echo "  ✔ 明文模块对照 OK")
 
 echo
+echo "== 8. 密钥分片：明文密钥不应出现在二进制里 =="
+cc -O2 -c -I "$CPP" -I "$CPP/lua" -o "$TMP/luax.o" "$CPP/luax.c"
+python3 - "$TMP/luax.o" "$ROOT/tools" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[2])
+import encrypt_luax as E
+key = E.key_bytes()
+data = open(sys.argv[1], "rb").read()
+hits = [n for n, pat in (("完整 32 字节", key), ("前半 16 字节", key[:16]),
+                         ("后半 16 字节", key[16:])) if pat in data]
+print("  luax.o 里明文密钥:", "未出现 ✓" if not hits else "出现 %s ✗" % hits)
+print("  混淆后的分片常量:", "在 ✓" if E._K_A in data else "不在 ✗")
+assert not hits, "明文密钥出现在二进制里: %s" % hits
+EOF
+
+echo
 echo "结论：LUAX v2（ChaCha20-Poly1305）加密→校验→解密→加载→执行 全链路一致，"
 echo "     篡改可被检出"
