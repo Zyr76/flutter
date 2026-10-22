@@ -16,8 +16,9 @@ extern "C" {
 #endif
 
 #define LUAX_MAGIC_STR    "LUAX"
-#define LUAX_HDR          24
-#define LUAX_VERSION      0x55
+#define LUAX_HDR          24          /* magic(4) ver(1) flags(1) rsv(2) nonce(12) len(4) */
+#define LUAX_TAG_LEN      16          /* Poly1305 认证标签，附在密文之后 */
+#define LUAX_VERSION      0x56        /* ChaCha20-Poly1305，头部 24 字节作为 AAD */
 #define LUAX_FLAG_BYTECODE 1
 
 int luax_is_encrypted(const char *s, size_t n);

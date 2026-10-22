@@ -31,13 +31,16 @@ int luax_decrypt_load(lua_State *L, const char *s, size_t n,
         return LUA_ERRSYNTAX;
     }
     if (p[4] != LUAX_VERSION) {
-        lua_pushfstring(L, "LUAX: 版本不匹配（文件 %d，运行时 %d）",
+        lua_pushfstring(L, "LUAX: 不支持的密文版本 %d（需要 %d）",
                         (int)p[4], (int)LUAX_VERSION);
         return LUA_ERRSYNTAX;
     }
     plain_len = (uint32_t)p[20] | ((uint32_t)p[21] << 8)
               | ((uint32_t)p[22] << 16) | ((uint32_t)p[23] << 24);
-    if (plain_len == 0 || (size_t)plain_len != n - LUAX_HDR) {
+    /* 密文后带 16 字节标签；头部 24 字节作为 AAD 参与认证，
+     * 因此 magic/version/flags/nonce/长度 任何一项被改都会校验失败。 */
+    if (plain_len == 0 || n < (size_t)LUAX_HDR + LUAX_TAG_LEN
+            || (size_t)plain_len != n - LUAX_HDR - LUAX_TAG_LEN) {
         lua_pushliteral(L, "LUAX: 长度字段与文件实际大小不符");
         return LUA_ERRSYNTAX;
     }
@@ -48,8 +51,14 @@ int luax_decrypt_load(lua_State *L, const char *s, size_t n,
         lua_pushliteral(L, "LUAX: 解密缓冲分配失败");
         return LUA_ERRMEM;
     }
-    memcpy(plain, p + LUAX_HDR, plain_len);
-    chacha20_xor(plain, plain_len, LUAX_KEY, p + 8, 1);
+    if (chacha20poly1305_decrypt(plain, p + LUAX_HDR, plain_len, LUAX_KEY,
+                                 p + 8, p, LUAX_HDR,
+                                 p + LUAX_HDR + plain_len) != 0) {
+        memset(plain, 0, plain_len);
+        free(plain);
+        lua_pushliteral(L, "LUAX: 密文校验失败（文件被篡改或密钥不匹配）");
+        return LUA_ERRSYNTAX;
+    }
     rc = luaL_loadbufferx(L, (const char *)plain, plain_len, chunkname,
                           mode ? "b" : "t");
     memset(plain, 0, plain_len);
@@ -129,7 +138,7 @@ static int luax_random_nonce(uint8_t nonce[12]) {
 
 unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen) {
     uint8_t nonce[12];
-    uint8_t *plain, *out;
+    uint8_t *out;
     size_t total;
     int is_bytecode;
 
@@ -139,19 +148,14 @@ unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen)
     if (!luax_random_nonce(nonce)) {
         return NULL;               /* 拿不到随机数就失败，绝不用固定 nonce */
     }
-    total = (size_t)LUAX_HDR + n;
-    plain = (uint8_t *)malloc(n);
+    total = (size_t)LUAX_HDR + n + LUAX_TAG_LEN;
     out = (uint8_t *)malloc(total);
-    if (plain == NULL || out == NULL) {
-        free(plain);
-        free(out);
+    if (out == NULL) {
         return NULL;
     }
-    memcpy(plain, data, n);
     /* 打包装的是 console.build 编译后的字节码，按 \x1bLua 头自动置 flags */
-    is_bytecode = (n >= 4 && plain[0] == 0x1b
-                   && memcmp(plain + 1, "Lua", 3) == 0) ? 1 : 0;
-    chacha20_xor(plain, n, LUAX_KEY, nonce, 1);
+    is_bytecode = (n >= 4 && data[0] == 0x1b
+                   && memcmp(data + 1, "Lua", 3) == 0) ? 1 : 0;
 
     memcpy(out, LUAX_MAGIC_STR, 4);
     out[4] = (uint8_t)LUAX_VERSION;
@@ -163,10 +167,11 @@ unsigned char *luax_encrypt(const unsigned char *data, size_t n, size_t *outlen)
     out[21] = (uint8_t)((uint32_t)n >> 8);
     out[22] = (uint8_t)((uint32_t)n >> 16);
     out[23] = (uint8_t)((uint32_t)n >> 24);
-    memcpy(out + LUAX_HDR, plain, n);
 
-    memset(plain, 0, n);
-    free(plain);
+    /* 头部 24 字节作为 AAD；密文写在其后，标签再跟在密文后 */
+    chacha20poly1305_encrypt(out + LUAX_HDR, data, n, LUAX_KEY, nonce,
+                             out, LUAX_HDR, out + LUAX_HDR + n);
+
     *outlen = total;
     return out;
 }
